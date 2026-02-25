@@ -1,6 +1,6 @@
 # 2026
 
-Kof's sketchbook year 2026, sketches are build with [Processing](http://processing.org) software.
+Kof's sketchbook year 2025, sketches are build with [Processing](http://processing.org) software.
 
 The sketches are organized by months of year. This structure can make feel of some order, which in fact is false. It is rather mess with all ideas and unfinished concepts placed in kind of plain time-line space. Feel free to dig in and recycle anything useful for you.. when you find something like this, do not hesitate to contact me, or use whatever what fits your current need.
 
@@ -11,7 +11,7 @@ There is a kind of selection hosted on [Open Processing](http://www.openprocessi
 ## Rendered Outputs
 
 Other way of on-line presentation is quite heavily re-compressed (h264) videos, they are more widely accepted due to more "standard media form". The most of these outputs are available on [Vimeo](https://vimeo.com/kof/videos).
-yq
+
 [YouTube](https://www.youtube.com/@krystofpesek/videos)
 
 ## Archival Code Bits and Pieces
@@ -44,13 +44,13 @@ Some of the videos and rendered outputs are available @ [YouTube](https://www.yo
 
 Clone them all /w simple command
 ```
-for i in 20{07,08,09,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25}; do echo $i; git clone
+for i in 20{07,08,09,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26}; do echo $i; git clone
 git@github.com:K0F/$i.git ; done
 ```
 
 *Enjoy, and feel free to recycle!*
 
-*light be with you*
+*Light be with you!*
 
 *-- kof*
 
