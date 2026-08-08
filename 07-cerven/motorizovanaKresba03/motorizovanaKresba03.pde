@@ -8,7 +8,7 @@ void setup() {
   stroke(0);
   noFill();
 
-  float step = 5.0;
+  float step = 7.0;
   boolean leftToRight = true;
 
   beginShape();
