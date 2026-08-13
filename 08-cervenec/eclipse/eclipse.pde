@@ -37,15 +37,16 @@ RENDER NOTES // viewed from the Earth, totality centered. Simple 2D
 always covers the Sun. Sizes keep the real 1.032 apparent-radius ratio.
 */
 
+
 PFont hudFont;
 
 final int W = 932;
 final int H = 576;
 
-final float SX      = W / 2.0;        // Sun / Moon centre
+final float SX      = W / 2.0;
 final float SY      = H / 2.0;
-final float SUN_R   = 170;
-final float MOON_R  = SUN_R * 1.032;  // just larger -> totality
+final float SUN_R   = 160;
+final float MOON_R  = SUN_R * 1.032;
 
 void settings() {
   size(W, H);
@@ -56,9 +57,9 @@ void setup() {
   try {
     hudFont = loadFont("TerminessNFP-12.vlw");
   } catch (Exception e) {
-    hudFont = createFont("SansSerif", 12);
+    hudFont = createFont("Monospaced", 11);
   }
-  noiseSeed(17);
+  noiseSeed(42);
 }
 
 void draw() {
@@ -71,111 +72,77 @@ void draw() {
 }
 
 void drawScene() {
-  // background gradient (deep space, lighter toward the Sun)
   noStroke();
-  for (int y = 0; y < H; y += 3) {
-    float t = y / (float) H;
-    fill(lerpColor(color(6, 10, 20), color(11, 17, 32), t));
-    rect(0, y, W, 3);
-  }
+  background(3, 5, 10);
 
   drawStars();
-  drawSun();
-  drawCorona();
+  drawCoronaGlow();
+  drawStreamers();
   drawMoon();
 }
 
 void drawStars() {
-  blendMode(ADD);
+  randomSeed(1337);
   noStroke();
-  randomSeed(3);
-  for (int i = 0; i < 220; i++) {
+  for (int i = 0; i < 200; i++) {
     float x = random(W);
     float y = random(H);
-    float b = random(35, 190);
+    float b = random(50, 160);
     fill(200, 215, 255, b);
-    float r = random(1) < 0.04 ? 1.5 : 0.8;
-    ellipse(x, y, r, r);
-  }
-  blendMode(BLEND);
-}
-
-void drawSun() {
-  // soft outer glow
-  blendMode(ADD);
-  noStroke();
-  for (int i = 0; i < 14; i++) {
-    float rr = SUN_R * (1.35 + i * 0.28);
-    float al = 44 * (1 - i / 14.0);
-    fill(255, 200, 130, al);
-    ellipse(SX, SY, rr * 2, rr * 2);
-  }
-  blendMode(BLEND);
-
-  // body: warm radial gradient
-  for (int i = 0; i < 22; i++) {
-    float rr = SUN_R * (1 - i / 22.0);
-    float t = i / 22.0;
-    fill(lerpColor(color(255, 244, 214), color(255, 150, 45), t));
-    ellipse(SX, SY, rr * 2, rr * 2);
+    ellipse(x, y, 0.8, 0.8);
   }
 }
 
-void drawCorona() {
-  blendMode(ADD);
+void drawCoronaGlow() {
   noStroke();
-
-  // inner pearly layer hugging the Moon's limb
-  for (int i = 0; i < 12; i++) {
-    float rr = MOON_R * (1.03 + i * 0.10);
-    float al = 150 * (1 - i / 12.0);
-    fill(255, 252, 240, al);
-    ellipse(SX, SY, rr * 2, rr * 2);
+  for (int i = 40; i > 0; i--) {
+    float t = i / 40.0;
+    float r = MOON_R + t * 180;
+    float alpha = pow(1.0 - t, 2.0) * 35;
+    fill(235, 243, 255, alpha);
+    ellipse(SX, SY, r * 2, r * 2);
   }
-  // outer cool-blue halo
-  for (int i = 0; i < 12; i++) {
-    float rr = MOON_R * (1.18 + i * 0.20);
-    float al = 34 * (1 - i / 12.0);
-    fill(150, 185, 255, al);
-    ellipse(SX, SY, rr * 2, rr * 2);
+  
+  for (int i = 20; i > 0; i--) {
+    float t = i / 20.0;
+    float r = MOON_R * (1.0 + t * 0.3);
+    float alpha = (1.0 - t) * 55;
+    fill(255, 230, 190, alpha);
+    ellipse(SX, SY, r * 2, r * 2);
   }
+}
 
-  // streamers — bezier tendrils radiating from the limb
+void drawStreamers() {
   strokeWeight(1);
-  randomSeed(9);
-  for (int i = 0; i < 24; i++) {
+  noFill();
+  randomSeed(99);
+  for (int i = 0; i < 36; i++) {
     float a = random(TWO_PI);
-    float r0 = MOON_R * 1.06;
-    float r1 = MOON_R * (1.7 + random(2.0));
-    float bend = random(-1, 1) * MOON_R * 0.8;
-    float da = random(-0.18, 0.18);
+    float r0 = MOON_R * 1.01;
+    float r1 = MOON_R * (1.3 + random(1.8));
+    float bend = random(-1, 1) * MOON_R * 0.4;
+    float da = random(-0.1, 0.1);
+    
     float cx = cos(a), cy = sin(a);
     float px = cos(a + da), py = sin(a + da);
-    stroke(255, 250, 240, random(40, 110));
+    
+    stroke(230, 240, 255, random(30, 80));
     bezier(SX + cx * r0, SY + cy * r0,
-           SX + cx * r0 + px * bend + px * MOON_R * 0.35,
-           SY + cy * r0 + py * bend + py * MOON_R * 0.35,
+           SX + cx * r0 + px * bend, SY + cy * r0 + py * bend,
            SX + px * r1 - px * bend, SY + py * r1 - py * bend,
            SX + px * r1, SY + py * r1);
   }
-
-  // diamond-ring glint at one limb
-  fill(255, 250, 225, 230);
-  float ga = -0.5;
-  ellipse(SX + cos(ga) * MOON_R, SY + sin(ga) * MOON_R, MOON_R * 0.18, MOON_R * 0.18);
-
-  blendMode(BLEND);
 }
 
 void drawMoon() {
   noStroke();
-  fill(5, 6, 10);
+  fill(2, 3, 6);
   ellipse(SX, SY, MOON_R * 2, MOON_R * 2);
+  
   noFill();
-  stroke(190, 165, 140, 70);
-  strokeWeight(1.5);
-  ellipse(SX, SY, MOON_R * 2, MOON_R * 2);
+  stroke(150, 175, 210, 120);
   strokeWeight(1);
+  ellipse(SX, SY, MOON_R * 2, MOON_R * 2);
 }
 
 void drawHUD() {
@@ -183,9 +150,30 @@ void drawHUD() {
     textFont(hudFont);
   }
   textAlign(LEFT, TOP);
-  fill(150, 175, 225, 185);
-
-  text("SOLAR ECLIPSE // 12 AUG 2026 // TOTALITY 02m18s", 14, 14);
-  text("GAMMA +0.898   MAG 1.0386   PATH 294 KM   SAROS 126", 14, 28);
-  text("GREATEST 17:46 UTC   MOON ~1.032x SUN", 14, 42);
+  
+  noStroke();
+  fill(0, 210);
+  rect(16, 16, 360, 180, 2);
+  
+  stroke(100, 120, 150, 100);
+  noFill();
+  rect(16, 16, 360, 180, 2);
+  
+  fill(180, 210, 255);
+  float y = 26;
+  float dy = 13;
+  
+  text("EVENT: SOLAR ECLIPSE // 12 AUG 2026[cite: 6]", 26, y); y += dy;
+  text("DATA SOURCE: NASA SE2026Aug12T[cite: 6]", 26, y); y += dy;
+  text("----------------------------------------", 26, y); y += dy;
+  text("TYPE: Total (T)[cite: 6]", 26, y); y += dy;
+  text("GREATEST: ~17:46 UTC (JD 2461265.24)[cite: 6]", 26, y); y += dy;
+  text("GAMMA: +0.8977 (N of center)[cite: 6]", 26, y); y += dy;
+  text("MAGNITUDE: 1.0386 (Obscuration 1.0788)[cite: 6]", 26, y); y += dy;
+  text("SAROS SERIES: 126[cite: 6]", 26, y); y += dy;
+  text("SUN R: ~695,700 KM (15'47.0\")[cite: 6]", 26, y); y += dy;
+  text("MOON R: 1,737.4 KM (16'16.9\")[cite: 6]", 26, y); y += dy;
+  text("EARTH R: 6,371 KM[cite: 6]", 26, y); y += dy;
+  text("UMBRA WIDTH: 294 KM (Dur: 02m18s)[cite: 6]", 26, y); y += dy;
+  text("GROUND POINT: 65.2°N 25.2°W[cite: 6]", 26, y);
 }
