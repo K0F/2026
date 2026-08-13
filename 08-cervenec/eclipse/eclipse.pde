@@ -32,10 +32,9 @@ eclipse.gsfc.nasa.gov Besselian elements SE2026Aug12T; Wikipedia
   Umbra width   294 km (~0.046 R(Earth))  duration 02m18s
   Ground point  65.2 N 25.2 W (Greenland / Denmark Strait)
 
-RENDER NOTES // illustrative screen-space composition. Everything is
-drawn flat in one 2D ortho pass (painter's order, depth test off), so
-the Moon disc reliably covers the Sun. Sizes keep the real ratios:
-Moon/Sun apparent radius 1.032, gamma shadow offset, umbra width.
+RENDER NOTES // viewed from the Earth, totality centered. Simple 2D
+(JAVA2D, no OpenGL) so it renders reliably headless and the Moon disc
+always covers the Sun. Sizes keep the real 1.032 apparent-radius ratio.
 */
 
 PFont hudFont;
@@ -43,19 +42,13 @@ PFont hudFont;
 final int W = 932;
 final int H = 576;
 
-// illustrative layout (screen pixels)
-final float SX      = 466;            // Sun / Moon centre
-final float SY      = 195;
-final float SUN_R   = 150;
+final float SX      = W / 2.0;        // Sun / Moon centre
+final float SY      = H / 2.0;
+final float SUN_R   = 170;
 final float MOON_R  = SUN_R * 1.032;  // just larger -> totality
-final float EX      = 715;            // Earth centre
-final float EY      = 462;
-final float EARTH_R = 30;
-final float GAMMA   = 0.898;          // shadow axis offset in R(Earth)
-final float UMBRA_K = 294.0 / 6371.0; // umbra width in R(Earth)
 
 void settings() {
-  size(W, H, P3D);
+  size(W, H);
   smooth(8);
 }
 
@@ -78,13 +71,8 @@ void draw() {
 }
 
 void drawScene() {
-  pushMatrix();
-  camera();
-  ortho(0, width, height, 0);
-  hint(DISABLE_DEPTH_TEST);
+  // background gradient (deep space, lighter toward the Sun)
   noStroke();
-
-  // background gradient (deep space, slightly lighter toward the Sun)
   for (int y = 0; y < H; y += 3) {
     float t = y / (float) H;
     fill(lerpColor(color(6, 10, 20), color(11, 17, 32), t));
@@ -92,19 +80,14 @@ void drawScene() {
   }
 
   drawStars();
-  drawOrbitRings();
-  drawShadowCones();
   drawSun();
   drawCorona();
   drawMoon();
-  drawEarth();
-
-  hint(ENABLE_DEPTH_TEST);
-  popMatrix();
 }
 
 void drawStars() {
   blendMode(ADD);
+  noStroke();
   randomSeed(3);
   for (int i = 0; i < 220; i++) {
     float x = random(W);
@@ -115,50 +98,6 @@ void drawStars() {
     ellipse(x, y, r, r);
   }
   blendMode(BLEND);
-}
-
-void drawOrbitRings() {
-  noFill();
-
-  // Earth's orbit around the Sun
-  stroke(96, 120, 190, 18);
-  strokeWeight(1);
-  ellipse(SX, SY, 560, 560);
-
-  // Moon's orbit around Earth, tilted ~5 deg
-  stroke(150, 170, 220, 22);
-  ellipse(EX, EY, 150, 150 * cos(radians(5)));
-
-  strokeWeight(1);
-}
-
-void drawShadowCones() {
-  noStroke();
-
-  // penumbra — soft wide veil from the Moon limb toward Earth
-  beginShape(TRIANGLE_STRIP);
-  fill(120, 140, 190, 6);
-  for (int i = 0; i <= 36; i++) {
-    float a = map(i, 0, 36, 0, TWO_PI);
-    float ca = cos(a), sa = sin(a);
-    vertex(SX + ca * MOON_R, SY + sa * MOON_R);
-    vertex(EX + ca * (EARTH_R * 2.6), EY + sa * (EARTH_R * 2.6));
-  }
-  endShape();
-
-  // umbra — narrow dark needle at the gamma-offset point
-  beginShape(TRIANGLE_STRIP);
-  fill(2, 3, 8, 55);
-  float TX = EX + 6;
-  float TY = EY + GAMMA * EARTH_R;
-  float half = max(1.0, EARTH_R * UMBRA_K * 3);
-  for (int i = 0; i <= 36; i++) {
-    float a = map(i, 0, 36, 0, TWO_PI);
-    float ca = cos(a), sa = sin(a);
-    vertex(SX + ca * MOON_R, SY + sa * MOON_R);
-    vertex(TX + ca * half, TY + sa * half);
-  }
-  endShape();
 }
 
 void drawSun() {
@@ -239,33 +178,7 @@ void drawMoon() {
   strokeWeight(1);
 }
 
-void drawEarth() {
-  noStroke();
-  fill(30, 64, 118);
-  ellipse(EX, EY, EARTH_R * 2, EARTH_R * 2);
-  // terminator — dark crescent away from the Sun
-  fill(8, 14, 32, 150);
-  ellipse(EX + EARTH_R * 0.42, EY + EARTH_R * 0.30, EARTH_R * 1.7, EARTH_R * 1.7);
-  // atmosphere rim
-  blendMode(ADD);
-  noFill();
-  stroke(150, 200, 255, 120);
-  strokeWeight(2);
-  arc(EX, EY, EARTH_R * 2.1, EARTH_R * 2.1, -1.2, 0.25);
-  strokeWeight(1);
-  blendMode(BLEND);
-
-  // umbra spot at the gamma-offset point on the lit face
-  noStroke();
-  fill(2, 3, 8, 230);
-  ellipse(EX + 6, EY + GAMMA * EARTH_R, EARTH_R * UMBRA_K * 6, EARTH_R * UMBRA_K * 6);
-}
-
 void drawHUD() {
-  camera();
-  ortho(0, width, height, 0);
-  hint(DISABLE_DEPTH_TEST);
-
   if (hudFont != null) {
     textFont(hudFont);
   }
@@ -275,6 +188,4 @@ void drawHUD() {
   text("SOLAR ECLIPSE // 12 AUG 2026 // TOTALITY 02m18s", 14, 14);
   text("GAMMA +0.898   MAG 1.0386   PATH 294 KM   SAROS 126", 14, 28);
   text("GREATEST 17:46 UTC   MOON ~1.032x SUN", 14, 42);
-
-  hint(ENABLE_DEPTH_TEST);
 }
