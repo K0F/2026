@@ -3,14 +3,14 @@
 
                  .
         .        ;|         .
-         .    .-; `-.       .
-   .     .  .'  |  `.  .      .
-         . /    )|(    \  .      .
+         .    .-; `-.        .
+   .     .  .'  |  `.  .     .
+         . /    )|(    \  .     .
    .     ;     |||     ;  .
-          \    (o o)    /       .
+          \    (o o)    /        .
    .      '-.  \_/  .-'    .
         .    `-.   .-'      .
-   .         .  (.)  .   .        .
+   .          .  (.)  .   .         .
       .         `-'   .      .
 
     SOLAR ECLIPSE // 12 AUG 2026
@@ -35,18 +35,17 @@ eclipse.gsfc.nasa.gov Besselian elements SE2026Aug12T; Wikipedia
 RENDER NOTES // viewed from the Earth, totality centered. Simple 2D
 (JAVA2D, no OpenGL) so it renders reliably headless and the Moon disc
 always covers the Sun. Sizes keep the real 1.032 apparent-radius ratio.
-*/
 
+Solar Eclipse of August 12, 2026 — Prague View (86.25% Partial Eclipse)
+*/
 
 PFont hudFont;
 
 final int W = 932;
 final int H = 576;
 
-final float SX      = W / 2.0;
-final float SY      = H / 2.0;
-final float SUN_R   = 160;
-final float MOON_R  = SUN_R * 1.032;
+final float SUN_R  = 160.0;
+final float MOON_R = 165.12; // Preserves the exact ~1.032 apparent radius ratio
 
 void settings() {
   size(W, H);
@@ -57,123 +56,133 @@ void setup() {
   try {
     hudFont = loadFont("TerminessNFP-12.vlw");
   } catch (Exception e) {
-    hudFont = createFont("Monospaced", 11);
+    hudFont = createFont("Monospaced", 12);
   }
-  noiseSeed(42);
+  noiseSeed(17);
 }
 
 void draw() {
-  drawScene();
+  drawBackground();
+  drawSunAndMoonPartial();
   drawHUD();
+  
   if (frameCount == 2) {
-    save("eclipse.png");
+    save("eclipse_prague_2d.png");
     exit();
   }
 }
 
-void drawScene() {
-  noStroke();
-  background(3, 5, 10);
-
-  drawStars();
-  drawCoronaGlow();
-  drawStreamers();
-  drawMoon();
-}
-
-void drawStars() {
-  randomSeed(1337);
-  noStroke();
-  for (int i = 0; i < 200; i++) {
-    float x = random(W);
-    float y = random(H);
-    float b = random(50, 160);
-    fill(200, 215, 255, b);
-    ellipse(x, y, 0.8, 0.8);
+void drawBackground() {
+  // Full-canvas evening twilight gradient (horizon geometry removed)
+  for (int y = 0; y < H; y++) {
+    float t = y / (float) H;
+    color topColor = color(8, 12, 24);
+    color midColor = color(32, 22, 40);
+    color lowColor = color(165, 75, 40);
+    color c;
+    if (t < 0.5) {
+      c = lerpColor(topColor, midColor, t / 0.5);
+    } else {
+      c = lerpColor(midColor, lowColor, (t - 0.5) / 0.5);
+    }
+    stroke(c);
+    line(0, y, W, y);
   }
 }
 
-void drawCoronaGlow() {
+void drawSunAndMoonPartial() {
+  pushMatrix();
+  translate(W / 2, H / 2);
+
+  // Atmospheric solar glow
+  blendMode(ADD);
   noStroke();
-  for (int i = 40; i > 0; i--) {
-    float t = i / 40.0;
-    float r = MOON_R + t * 180;
-    float alpha = pow(1.0 - t, 2.0) * 35;
-    fill(235, 243, 255, alpha);
-    ellipse(SX, SY, r * 2, r * 2);
+  for (int i = 0; i < 15; i++) {
+    float rr = SUN_R * (1.08 + i * 0.10);
+    float al = 25 * (1 - i / 15.0);
+    fill(255, 170, 90, al);
+    ellipse(0, 0, rr * 2, rr * 2);
   }
-  
-  for (int i = 20; i > 0; i--) {
+  blendMode(BLEND);
+
+  // Solar disk body
+  noStroke();
+  for (int i = 0; i < 20; i++) {
+    float rr = SUN_R * (1 - i / 20.0);
     float t = i / 20.0;
-    float r = MOON_R * (1.0 + t * 0.3);
-    float alpha = (1.0 - t) * 55;
-    fill(255, 230, 190, alpha);
-    ellipse(SX, SY, r * 2, r * 2);
+    fill(lerpColor(color(255, 252, 235), color(255, 145, 35), t));
+    ellipse(0, 0, rr * 2, rr * 2);
   }
-}
 
-void drawStreamers() {
-  strokeWeight(1);
-  noFill();
-  randomSeed(99);
-  for (int i = 0; i < 36; i++) {
-    float a = random(TWO_PI);
-    float r0 = MOON_R * 1.01;
-    float r1 = MOON_R * (1.3 + random(1.8));
-    float bend = random(-1, 1) * MOON_R * 0.4;
-    float da = random(-0.1, 0.1);
-    
-    float cx = cos(a), cy = sin(a);
-    float px = cos(a + da), py = sin(a + da);
-    
-    stroke(230, 240, 255, random(30, 80));
-    bezier(SX + cx * r0, SY + cy * r0,
-           SX + cx * r0 + px * bend, SY + cy * r0 + py * bend,
-           SX + px * r1 - px * bend, SY + py * r1 - py * bend,
-           SX + px * r1, SY + py * r1);
-  }
-}
+  // Moon position yielding 86.25% obscuration (Prague view at max eclipse)
+  float moonOffsetX = 20.0;
+  float moonOffsetY = 45.0;
 
-void drawMoon() {
-  noStroke();
-  fill(2, 3, 6);
-  ellipse(SX, SY, MOON_R * 2, MOON_R * 2);
+  pushMatrix();
+  translate(moonOffsetX, moonOffsetY);
   
+  // Dark lunar body
+  fill(10, 10, 16);
+  ellipse(0, 0, MOON_R * 2, MOON_R * 2);
+  
+  // Atmospheric rim line along the overlapping lunar edge
   noFill();
-  stroke(150, 175, 210, 120);
-  strokeWeight(1);
-  ellipse(SX, SY, MOON_R * 2, MOON_R * 2);
+  stroke(255, 190, 140, 110);
+  strokeWeight(1.2);
+  ellipse(0, 0, MOON_R * 2, MOON_R * 2);
+  
+  popMatrix();
+
+  // Highlight at crescent tips
+  blendMode(ADD);
+  noStroke();
+  fill(255, 90, 60, 150);
+  ellipse(-SUN_R * 0.52, -SUN_R * 0.48, 14, 14);
+  ellipse(SUN_R * 0.48, -SUN_R * 0.52, 12, 12);
+  blendMode(BLEND);
+
+  popMatrix();
 }
 
 void drawHUD() {
+  pushStyle();
+  
+  // Translucent dark backing panel for high contrast & crisp text readability
+  noStroke();
+  fill(10, 14, 24, 215);
+  rect(14, 14, 590, 130, 6);
+  
+  // Border outline
+  stroke(80, 110, 160, 140);
+  strokeWeight(1);
+  noFill();
+  rect(14, 14, 590, 130, 6);
+
   if (hudFont != null) {
     textFont(hudFont);
+  } else {
+    textSize(12);
   }
+  
   textAlign(LEFT, TOP);
   
-  noStroke();
-  fill(0, 210);
-  rect(16, 16, 360, 180, 2);
+  int startX = 26;
+  int startY = 24;
+  int lineH  = 18;
+
+  // Header line
+  fill(255, 220, 130);
+  text("SOLAR ECLIPSE // 12 AUG 2026 // PRAGUE VIEW (PARTIAL)", startX, startY);
+
+  // Calculated astronomical data lines
+  fill(210, 230, 255);
+  text("OBSCURATION: 86.25%   |  MAX ECLIPSE: 20:11 CEST (18:11 UTC)", startX, startY + lineH);
+  text("POSITION:    AZ 292° (WNW)  |  ALTITUDE: ~1.7° (SUNSET)", startX, startY + lineH * 2);
+  text("ELEMENTS:    GAMMA +0.8977  |  MAGNITUDE 1.0386  |  SAROS 126", startX, startY + lineH * 3);
+  text("ANGULAR:     SUN 15'47.0\"   |  MOON 16'16.9\" (RATIO 1.032)", startX, startY + lineH * 4);
   
-  stroke(100, 120, 150, 100);
-  noFill();
-  rect(16, 16, 360, 180, 2);
-  
-  fill(180, 210, 255);
-  float y = 26;
-  float dy = 13;
-  
-  text("EVENT: SOLAR ECLIPSE // 12 AUG 2026[cite: 6]", 26, y); y += dy;
-  text("DATA SOURCE: NASA SE2026Aug12T[cite: 6]", 26, y); y += dy;
-  text("----------------------------------------", 26, y); y += dy;
-  text("TYPE: Total (T)[cite: 6]", 26, y); y += dy;
-  text("GREATEST: ~17:46 UTC (JD 2461265.24)[cite: 6]", 26, y); y += dy;
-  text("GAMMA: +0.8977 (N of center)[cite: 6]", 26, y); y += dy;
-  text("MAGNITUDE: 1.0386 (Obscuration 1.0788)[cite: 6]", 26, y); y += dy;
-  text("SAROS SERIES: 126[cite: 6]", 26, y); y += dy;
-  text("SUN R: ~695,700 KM (15'47.0\")[cite: 6]", 26, y); y += dy;
-  text("MOON R: 1,737.4 KM (16'16.9\")[cite: 6]", 26, y); y += dy;
-  text("EARTH R: 6,371 KM[cite: 6]", 26, y); y += dy;
-  text("UMBRA WIDTH: 294 KM (Dur: 02m18s)[cite: 6]", 26, y); y += dy;
-  text("GROUND POINT: 65.2°N 25.2°W[cite: 6]", 26, y);
+  fill(140, 170, 210);
+  text("UMBRA WIDTH: 294 KM         |  GREATEST POINT: 65.2°N 25.2°W", startX, startY + lineH * 5);
+
+  popStyle();
 }
