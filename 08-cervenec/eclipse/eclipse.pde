@@ -179,7 +179,7 @@ void drawHUD() {
   text("OBSCURATION: 86.25%   |  MAX ECLIPSE: 20:11 CEST (18:11 UTC)", startX, startY + lineH);
   text("POSITION:    AZ 292° (WNW)  |  ALTITUDE: ~1.7° (SUNSET)", startX, startY + lineH * 2);
   text("ELEMENTS:    GAMMA +0.8977  |  MAGNITUDE 1.0386  |  SAROS 126", startX, startY + lineH * 3);
-  text("ANGULAR:     SUN 15'47.0\"   |  MOON 16'16.9\" (RATIO 1.032)", startX, startY + lineH * 4);
+  text("ANGULAR:     SUN 15'47.0''   |  MOON 16'16.9'' (RATIO 1.032)", startX, startY + lineH * 4);
   
   fill(140, 170, 210);
   text("UMBRA WIDTH: 294 KM         |  GREATEST POINT: 65.2°N 25.2°W", startX, startY + lineH * 5);
