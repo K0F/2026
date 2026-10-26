@@ -31,6 +31,9 @@ class Fly {
   boolean isFemale = true;
   float bodyScale = 1.0;
   
+  // Female spermatheca (stores mate's brain and epigenetics for transgenerational inheritance)
+  FlyBrain lastMateBrain = null;
+
   // Oviposition & Vitellogenesis (Females)
   float vitellogenesis = 0.0;
   int matureEggs = 0;
@@ -94,7 +97,8 @@ class Fly {
 
   Fly(float x, float y, float z, FlyBrain inheritedBrain) {
     this(x, y, z);
-    this.brain = inheritedBrain.mutateCopy();
+    this.brain = inheritedBrain;
+    this.bodyScale = isFemale ? (1.08 * brain.wingAspectMod) : (0.92 * brain.wingAspectMod);
   }
 
   void initLegs() {
@@ -214,7 +218,9 @@ class Fly {
 
     vision.update(pos, heading, pitch, env, swarm, this);
 
-    // 3. BRAIN COGNITIVE DELIBERATION (Thinking with spatial memory)
+    PVector wind = env.getWindAt(pos);
+
+    // 3. BRAIN COGNITIVE DELIBERATION (Thinking with spatial memory, needs & aero cues)
     brain.computeThinking(
       vision.getLeftLuminance(),
       vision.getRightLuminance(),
@@ -232,7 +238,9 @@ class Fly {
       heading,
       bodyTemp,
       state,
-      isFemale
+      isFemale,
+      env,
+      wind
     );
 
     // 4. MOTOR STEERING & PROPORTIONAL TARGET GUIDANCE
@@ -247,8 +255,6 @@ class Fly {
     handleStateMachine(env, jumpCmd, feedCmd, ovipositWingCmd, closestFood, minDist);
 
     // 5. KINEMATIC INTEGRATION
-    PVector wind = env.getWindAt(pos);
-
     if (state == STATE_FLYING) {
       wingFold = min(1.0, wingFold + 0.18);
       wingPhase += (wingFrequency / 60.0) * TWO_PI * 0.08;
@@ -256,38 +262,42 @@ class Fly {
 
       if (trehalose <= 0.01) wingThrustCmd *= 0.2;
 
-      // Steady Flight Model: Proportional Target Guidance vs Steady Inter-saccadic Cruising
+      // Update adaptive aero-navigation (crab-angle compensation & vertical trim)
+      brain.updateAirNavigation(this, env, wind);
+
       saccadeTimer -= 0.016;
 
-      if (brain.hasActiveTarget()) {
-        // Locked Proportional Navigation straight toward targeted memory coordinates!
-        PVector target = brain.getActiveTarget();
-        PVector toTarget = PVector.sub(target, pos);
-        float desiredYaw = atan2(toTarget.y, toTarget.x);
-        float yawDiff = atan2(sin(desiredYaw - heading), cos(desiredYaw - heading));
-        heading = lerp(heading, heading + yawDiff, 0.09);
+      // Target steering towards the calculated stimulus direction (Memory / Upwind / Casting)
+      PVector stimDir = brain.stimulusDirection;
+      float desiredYaw = atan2(stimDir.y, stimDir.x);
+      float yawDiff = atan2(sin(desiredYaw - heading), cos(desiredYaw - heading));
 
-        float horizDist = sqrt(toTarget.x * toTarget.x + toTarget.y * toTarget.y);
-        float desiredPitch = atan2(toTarget.z - pos.z, max(15, horizDist));
-        pitch = lerp(pitch, constrain(desiredPitch, -0.4, 0.4), 0.08);
-        roll = lerp(roll, -yawDiff * 0.6, 0.12);
-
-      } else {
-        // Steady straight cruising; sharp deliberate saccades every 1.5 - 3.0 seconds
+      if (brain.activeBehavior == BEHAVIOR_CRUISE) {
         if (saccadeTimer <= 0) {
           heading += random(-1, 1) * random(0.6, 1.4); // Sharp saccadic turn
           saccadeTimer = random(1.6, 3.2); // Cruise straight for next few seconds
         }
         pitch = lerp(pitch, pitchCmd * 0.25, 0.05);
         roll = lerp(roll, -steerCmd * 0.4, 0.08);
+      } else {
+        // Deliberate flight towards stimuli
+        heading = lerp(heading, heading + yawDiff, 0.08);
+        float horizDist = sqrt(stimDir.x * stimDir.x + stimDir.y * stimDir.y);
+        float desiredPitch = atan2(stimDir.z, max(0.1, horizDist));
+        pitch = lerp(pitch, constrain(desiredPitch, -0.4, 0.4), 0.08);
+        roll = lerp(roll, -yawDiff * 0.6, 0.12);
       }
 
-      PVector thrust = new PVector(cos(heading) * cos(pitch), sin(heading) * cos(pitch), sin(pitch));
+      // Learned crab-angle steering: wings angle thrust into crosswind to cancel lateral drift!
+      float thrustHeading = heading + brain.crabAngle;
+      float thrustPitch = pitch + brain.pitchTrim;
+
+      PVector thrust = new PVector(cos(thrustHeading) * cos(thrustPitch), sin(thrustHeading) * cos(thrustPitch), sin(thrustPitch));
       thrust.mult(max(0.7, wingThrustCmd * 2.3));
       acc.add(thrust);
 
       acc.add(env.gravity);
-      acc.add(PVector.mult(wind, 0.12));
+      acc.add(PVector.mult(wind, 0.14));
 
       vel.add(acc);
       vel.mult(0.93);
@@ -407,8 +417,9 @@ class Fly {
             PVector d = PVector.sub(targetMate.pos, pos);
             heading = lerp(heading, atan2(d.y, d.x), 0.1);
             if (PVector.dist(pos, targetMate.pos) < 18) {
-              targetMate.brain.applyDopamineReward(1.2);
-              this.brain.applyDopamineReward(1.2);
+              targetMate.lastMateBrain = this.brain; // Female stores father's brain and epigenetics
+              targetMate.brain.applyDopamineReward(1.5);
+              this.brain.applyDopamineReward(1.5);
               state = STATE_CRAWLING;
               stateTimer = 0;
             }
@@ -417,9 +428,10 @@ class Fly {
           if (matureEggs > 0 && closestFood != null && minDist < 35 && closestFood.type == 1) { // FOOD_PROTEIN
             ovipositorExtension = lerp(ovipositorExtension, 1.0, 0.15);
             if (ovipositorExtension > 0.85 && frameCount % 35 == 0) {
-              env.eggs.add(new Egg(pos.x + random(-4, 4), pos.y + random(-4, 4), 0, this.brain));
+              // Pass maternal brain AND paternal stored brain for epigenetic inheritance!
+              env.eggs.add(new Egg(pos.x + random(-4, 4), pos.y + random(-4, 4), 0, this.brain, this.lastMateBrain));
               matureEggs--;
-              brain.applyDopamineReward(1.5);
+              brain.applyDopamineReward(1.8);
               if (matureEggs <= 0) {
                 ovipositorExtension = 0;
                 state = STATE_CRAWLING;
@@ -631,29 +643,43 @@ class Fly {
       ellipse(sShadow.x, sShadow.y, 6.0, 3.5);
     }
 
-    // 3. Selection Indicator Box
+    // 3. Selection Indicator & Aerodynamic Flight Vectors
     if (isSelected) {
       stroke(100, 220, 255, 180);
       strokeWeight(1);
       noFill();
-      rect(sPos.x - 7, sPos.y - 7, 14, 14);
+      rect(sPos.x - 8, sPos.y - 8, 16, 16);
       
       fill(100, 220, 255);
       textAlign(CENTER, BOTTOM);
-      text((isFemale ? "F" : "M"), sPos.x, sPos.y - 8);
+      text((isFemale ? "F" : "M") + " F" + brain.generation, sPos.x, sPos.y - 9);
+
+      // Aerodynamic Flight Vectors (Visualizing learned crab-angle and ground track)
+      if (state == STATE_FLYING) {
+        float tYaw = heading + brain.crabAngle;
+        PVector sThrust = cam.toScreen(pos.x + cos(tYaw) * 16, pos.y + sin(tYaw) * 16, pos.z + sin(pitch + brain.pitchTrim) * 12);
+        stroke(255, 215, 60, 160); // Yellow: Thrust direction
+        line(sPos.x, sPos.y, sThrust.x, sThrust.y);
+
+        PVector sTrack = cam.toScreen(pos.x + vel.x * 6, pos.y + vel.y * 6, pos.z + vel.z * 6);
+        stroke(80, 240, 150, 210); // Green: Resultant Ground Track
+        line(sPos.x, sPos.y, sTrack.x, sTrack.y);
+      }
     }
 
-    // 4. Tiny Fly Avatar: Just a few pixels wide!
+    // 4. Tiny Fly Avatar: Pixel Chitin Tinted by Speciation Strain
     pushMatrix();
     translate(sPos.x, sPos.y);
+
+    float wingSpan = 5.0 * brain.wingAspectMod;
 
     if (state == STATE_FLYING || state == STATE_TAKEOFF) {
       noStroke();
       fill(220, 240, 255, 130);
-      ellipse(-2.5, -1, 5, 2.5);
-      ellipse(2.5, -1, 5, 2.5);
+      ellipse(-wingSpan * 0.5, -1, wingSpan, 2.5);
+      ellipse(wingSpan * 0.5, -1, wingSpan, 2.5);
 
-      fill(35, 30, 28);
+      fill(brain.speciesChitinColor);
       ellipse(0, 0, 4.5, 3.5);
 
       fill(190, 30, 20);
@@ -668,11 +694,11 @@ class Fly {
       line(-2.5, 2, 2.5, 2);
 
       noStroke();
-      fill(38, 34, 30);
+      fill(brain.speciesChitinColor);
       ellipse(0, 0, 4.5, 3.2);
 
       fill(210, 230, 250, 150);
-      ellipse(0, 0.5, 3.2, 4.5);
+      ellipse(0, 0.5, 3.2, 4.5 * brain.wingAspectMod);
 
       fill(190, 30, 20);
       ellipse(-1.0, -1.4, 1.4, 1.4);

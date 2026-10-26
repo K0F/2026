@@ -564,12 +564,16 @@ class ScentParticle {
 class Egg {
   PVector pos;
   float incubation = 0.0; // 0.0 to 1.0
-  float hatchRate = 0.0018; // Incubation speed
+  float hatchRate = 0.0025; // Incubation speed
   FlyBrain inheritedBrain;
 
-  Egg(float x, float y, float z, FlyBrain brain) {
+  Egg(float x, float y, float z, FlyBrain motherBrain, FlyBrain fatherBrain) {
     pos = new PVector(x, y, z);
-    inheritedBrain = brain.mutateCopy();
+    inheritedBrain = new FlyBrain().mutateCopyWithEpigenetics(motherBrain, fatherBrain);
+  }
+
+  Egg(float x, float y, float z, FlyBrain brain) {
+    this(x, y, z, brain, null);
   }
 
   void update() {

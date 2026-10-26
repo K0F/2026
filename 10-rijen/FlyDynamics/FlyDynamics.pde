@@ -91,7 +91,7 @@ void draw() {
           adult.state = STATE_CRAWLING;
           adult.trehalose = 0.95;
           swarm.add(adult);
-          logEvent("ECLOSION: LARVA PUPATED INTO ADULT " + (adult.isFemale ? "FEMALE" : "MALE") + " #" + swarm.size());
+          logEvent("ECLOSION: " + adult.brain.speciesName + " BORN (GEN F" + adult.brain.generation + ", INHERITED AERO " + int(adult.brain.inheritedAeroSkill * 100) + "%)");
         }
         env.larvae.remove(i);
       }
@@ -170,10 +170,10 @@ void displayBottomInspector(Fly f) {
   strokeWeight(1);
   rect(col2X, bottomY, col2W, bottomH);
 
-  // Title Banner & Specimen ID
+  // Title Banner & Specimen ID with Generation & Speciation Subspecies
   fill(190, 225, 255);
   textAlign(LEFT, TOP);
-  String sexTitle = f.isFemale ? "SPECIMEN #" + (selectedIndex + 1) + " (FEMALE DIPTERA)" : "SPECIMEN #" + (selectedIndex + 1) + " (MALE DIPTERA)";
+  String sexTitle = f.brain.speciesName + " #" + (selectedIndex + 1) + " (F" + f.brain.generation + " " + (f.isFemale ? "FEMALE" : "MALE") + ")";
   text(sexTitle, col2X + 10, bottomY + 8);
 
   // Thought stream badge
@@ -197,10 +197,13 @@ void displayBottomInspector(Fly f) {
 
   fill(170, 205, 240);
   textAlign(LEFT, TOP);
-  text("STATE: " + getStateName(f.state), metersX, metersY);
+  text("STATE: " + getStateName(f.state) + " | STRAIN: " + f.brain.subspecies, metersX, metersY);
   metersY += 18;
 
   drawPixelBar("TREHALOSE FUEL", f.trehalose, color(255, 205, 50), metersX, metersY, metersW);
+  metersY += 18;
+
+  drawPixelBar("AIR NAV SKILL", f.brain.aeroSkill, color(90, 220, 255), metersX, metersY, metersW);
   metersY += 18;
 
   if (f.isFemale) {
@@ -214,18 +217,18 @@ void displayBottomInspector(Fly f) {
   metersY += 18;
 
   drawPixelBar("SENSOR HYGIENE", f.cleanliness, color(80, 230, 130), metersX, metersY, metersW);
-  metersY += 20;
+  metersY += 18;
 
   fill(150, 185, 220);
-  text("TEMP: " + nf(f.bodyTemp, 0, 1) + " C (" + int(f.wingFrequency) + " HZ WINGS)", metersX, metersY);
+  text("TEMP: " + nf(f.bodyTemp, 0, 1) + " C | CRAB TRIM: " + nf(degrees(f.brain.crabAngle), 0, 1) + " DEG", metersX, metersY);
   metersY += 14;
 
   if (f.isFemale) {
     fill(255, 240, 180);
-    text("OVIDUCT EGGS: " + f.matureEggs + " / 6 MATURE", metersX, metersY);
+    text("OVIDUCT EGGS: " + f.matureEggs + " / 6 MATURE | F" + f.brain.generation, metersX, metersY);
   } else {
     fill(200, 180, 255);
-    text("COURTSHIP SONG: 165 HZ WING BUZZ", metersX, metersY);
+    text("COURTSHIP SONG: 165 HZ | F" + f.brain.generation, metersX, metersY);
   }
   metersY += 14;
 

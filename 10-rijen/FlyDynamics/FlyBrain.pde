@@ -1,31 +1,43 @@
 // =============================================================================
-// FlyBrain.pde - Diptera Cognitive Model: Spatial Working Memory & Saccades
+// FlyBrain.pde - Diptera Cognitive Model: Epigenetics, Sigmoidal Needs & Aero Plasticity
 // =============================================================================
-// Janelia Connectome Cognitive Model:
-// 1. Central Complex (CX) Spatial Working Memory:
-//    - Memorizes 3D coordinates of what the fly has seen:
-//      * Sugar / Carbohydrate locations (fuel)
-//      * Protein / Yeast substrate (vitellogenesis & eggs)
-//      * Water dew condensation points (hydration)
-//      * Warm ceiling perches (thermoregulation & sleep)
-// 2. Goal Arbitration:
-//    - Evaluates internal homeostatic deficits (trehalose, protein, hydration, temp)
-//    - Selects deliberate behavioral target from spatial memory
-// 3. Proportional Navigation & Smooth Flight Guidance:
-//    - Inter-saccadic straight cruising vs locked target approach
+// Features:
+// 1. Sigmoidal Homeostatic Decision Engine:
+//    - Evaluates competitive physiological drives through sigmoid activation functions:
+//      sigma(x, k, x0) = 1 / (1 + exp(-k * (x - x0)))
+//    - Determines dominant goal (Sugar, Protein, Dew, Warmth, Mate, Groom, Escape)
+// 2. Stimulus Flight Direction Engine:
+//    - Working memory target guidance
+//    - Anemotactic upwind plume surge when scent is detected
+//    - Crosswind casting sweep in turbulent flow fields to intercept plumes
+// 3. Adaptive Aero-Navigation Plasticity:
+//    - Plastic crab-angle compensation (wCrabComp) against crosswinds
+//    - Vertical pitch trim (wPitchTrim) against downdrafts / surfing thermals
+//    - Gyroscopic haltere stabilization (wGyroDamping)
+// 4. Transgenerational Epigenetic Inheritance & Speciation:
+//    - Parental experience tags passed into eggs
+//    - Offspring born with pre-primed aero skills and sensory affinities
+//    - Speciation divergence: Musca d. aeronavis, vorax, fecundis, vigilans, hydrotropica
 // =============================================================================
 
 // Distinct Model Behaviors
 final int BEHAVIOR_CRUISE = 0;           // Steady straight cruising with occasional saccades
-final int BEHAVIOR_TARGET_SUGAR = 1;     // Direct flight to remembered sugar coordinates
-final int BEHAVIOR_TARGET_PROTEIN = 2;   // Direct flight to remembered protein coordinates
-final int BEHAVIOR_TARGET_DEW = 3;       // Direct flight to remembered condensation dew
-final int BEHAVIOR_TARGET_PERCH = 4;     // Flight to warm ceiling wire for restful torpor
+final int BEHAVIOR_TARGET_SUGAR = 1;     // Flight towards sugar (sucrose fuel)
+final int BEHAVIOR_TARGET_PROTEIN = 2;   // Flight towards protein substrate (yeast)
+final int BEHAVIOR_TARGET_DEW = 3;       // Flight towards condensation dew
+final int BEHAVIOR_TARGET_PERCH = 4;     // Flight to warm ceiling wire for torpor
 final int BEHAVIOR_PRECISION_LAND = 5;   // Controlled deceleration & touchdown on food
 final int BEHAVIOR_FEEDING = 6;          // Proboscis extension feeding
 final int BEHAVIOR_GROOMING = 7;         // Systematic hygiene cleaning
 final int BEHAVIOR_COURTSHIP = 8;        // Male pursuit and unilateral wing song
 final int BEHAVIOR_ESCAPE = 9;           // Giant Fiber evasive catapult jump
+
+// Epigenetic Mark Indices
+final int EPI_AERO = 0;       // Aerodynamic flight experience in turbulent wind
+final int EPI_SUCROSE = 1;    // Sucrose foraging experience
+final int EPI_PROTEIN = 2;    // Protein / vitellogenesis experience
+final int EPI_VIGILANCE = 3;  // Threat escape experience
+final int NUM_EPI_MARKS = 4;
 
 class FlyBrain {
   final int NUM_INPUTS = 12;
@@ -62,7 +74,7 @@ class FlyBrain {
 
   // SPATIAL WORKING MEMORY: What the fly has seen and where to get it!
   PVector memSugarLoc = null;
-  float memSugarConf = 0.0; // 0.0 to 1.0
+  float memSugarConf = 0.0;
 
   PVector memProteinLoc = null;
   float memProteinConf = 0.0;
@@ -73,9 +85,39 @@ class FlyBrain {
   PVector memPerchLoc = new PVector(0, 0, 440);
   float memPerchConf = 0.8;
 
-  // Active Navigation Target
+  // Active Navigation Target & Stimulus Direction
   PVector activeTarget = null;
   String targetDescription = "NONE";
+  PVector stimulusDirection = new PVector(1, 0, 0);
+  String stimulusStrategy = "STEADY CRUISE";
+
+  // Sigmoidal Needs / Urgencies
+  float driveSugar = 0;
+  float driveProtein = 0;
+  float driveDew = 0;
+  float driveWarmth = 0;
+  float driveMate = 0;
+  float driveGroom = 0;
+  float driveEscape = 0;
+
+  // Aerodynamic Navigation Plasticity
+  float aeroSkill = 0.14;          // 0.0 to 1.0 (mastery of turbulent flight)
+  float inheritedAeroSkill = 0.12; // Epigenetically inherited baseline
+  float wCrabComp = 0.18;          // Crosswind crab-angle compensation weight
+  float wPitchTrim = 0.18;         // Vertical draft trim weight
+  float wGyroDamping = 0.22;       // Haltere gyroscopic stabilization weight
+  float crabAngle = 0.0;           // Active crab angle offset (radians)
+  float pitchTrim = 0.0;           // Active pitch trim offset (radians)
+  float airSlip = 0.0;             // Sensed crosswind slip angle (radians)
+  float groundTrackAlignment = 0.0;// Alignment of velocity with stimulus direction
+
+  // Transgenerational Epigenetics & Speciation
+  float[] epigeneticMarks = new float[NUM_EPI_MARKS];
+  int generation = 0;
+  String speciesName = "Musca domestica";
+  String subspecies = "typica";
+  color speciesChitinColor = color(55, 60, 68);
+  float wingAspectMod = 1.0;
 
   // Central Complex Ring Attractor (Compass Heading)
   float[] ringAttractor = new float[8];
@@ -96,6 +138,7 @@ class FlyBrain {
     initInnateWiring();
     for (int i = 0; i < rewardHistory.length; i++) rewardHistory[i] = 0;
     for (int i = 0; i < 8; i++) ringAttractor[i] = 0.1;
+    for (int i = 0; i < NUM_EPI_MARKS; i++) epigeneticMarks[i] = 0.10;
   }
 
   void initInnateWiring() {
@@ -151,25 +194,12 @@ class FlyBrain {
     wHiddenOutput[5][4] = 0.5;
   }
 
-  FlyBrain mutateCopy() {
-    FlyBrain child = new FlyBrain();
-    for (int i = 0; i < NUM_INPUTS; i++) {
-      for (int j = 0; j < NUM_HIDDEN; j++) {
-        child.wInputHidden[i][j] = this.wInputHidden[i][j] + random(-0.04, 0.04);
-      }
-    }
-    for (int i = 0; i < NUM_HIDDEN; i++) {
-      for (int j = 0; j < NUM_HIDDEN; j++) {
-        child.wHiddenHidden[i][j] = this.wHiddenHidden[i][j] + random(-0.03, 0.03);
-      }
-      for (int k = 0; k < NUM_OUTPUTS; k++) {
-        child.wHiddenOutput[i][k] = this.wHiddenOutput[i][k] + random(-0.04, 0.04);
-      }
-    }
-    return child;
+  // Sigmoidal Mathematical Activation Function
+  float sigmoid(float x, float k, float x0) {
+    return 1.0 / (1.0 + exp(-k * (x - x0)));
   }
 
-  // Visual & Tarsal Working Memory: Record what the fly sees and where to get it!
+  // Visual & Tarsal Working Memory
   void recordSeenFood(PVector loc, int foodType, float confidence) {
     if (foodType == 0) { // FOOD_CARB
       memSugarLoc = loc.copy();
@@ -212,12 +242,15 @@ class FlyBrain {
     historyIndex = (historyIndex + 1) % rewardHistory.length;
   }
 
-  // Cognitive Thinking & Deliberation Engine
+  // ---------------------------------------------------------------------------
+  // Cognitive Deliberation & Sigmoidal Decision Engine
+  // ---------------------------------------------------------------------------
   void computeThinking(float visL, float visR, float loom, float carbOdor, float proteinOdor, 
                        float pheromone, float tarsalSugar, float haltereGyro, float compass, 
                        float hunger, float eggUrge, float thirst, 
-                       PVector flyPos, float flyHeading, float flyTemp, int flyState, boolean isFemale) {
-    // 1. Influx
+                       PVector flyPos, float flyHeading, float flyTemp, int flyState, boolean isFemale,
+                       Environment env, PVector wind) {
+    // 1. Sensory Influx
     inputs[0] = visL;
     inputs[1] = visR;
     inputs[2] = loom;
@@ -233,7 +266,7 @@ class FlyBrain {
 
     dopamineReward *= 0.88;
 
-    // Memory Decay
+    // Working Memory Decay
     if (memSugarConf > 0) memSugarConf = max(0, memSugarConf - 0.00025);
     if (memProteinConf > 0) memProteinConf = max(0, memProteinConf - 0.00025);
     if (memDewConf > 0) memDewConf = max(0, memDewConf - 0.00025);
@@ -246,7 +279,7 @@ class FlyBrain {
       ringAttractor[i] = lerp(ringAttractor[i], target, 0.2);
     }
 
-    // 3. Hidden Layer Integrator
+    // 3. Hidden Layer Recurrent Integrator
     for (int j = 0; j < NUM_HIDDEN; j++) {
       float sum = 0;
       for (int i = 0; i < NUM_INPUTS; i++) {
@@ -262,8 +295,8 @@ class FlyBrain {
       prevHidden[j] = hidden[j];
     }
 
-    // 4. Model Behavior Selection from Homeostatic Needs & Spatial Memory
-    deliberateModelBehavior(flyPos, flyHeading, flyTemp, flyState, isFemale);
+    // 4. Sigmoidal Need Decision & Stimulus Direction Calculation
+    evaluateSigmoidalNeedsAndDirection(flyPos, flyHeading, flyTemp, flyState, isFemale, env, wind, carbOdor, proteinOdor, pheromone, loom);
 
     // 5. Motor Outputs
     for (int k = 0; k < NUM_OUTPUTS; k++) {
@@ -272,8 +305,8 @@ class FlyBrain {
         sum += max(0, hidden[j]) * wHiddenOutput[j][k];
       }
 
-      // Drive motor commands according to active deliberate target
-      if (hasActiveTarget()) {
+      // Proportional drive according to active deliberate target
+      if (hasActiveTarget() || activeBehavior == BEHAVIOR_TARGET_SUGAR || activeBehavior == BEHAVIOR_TARGET_PROTEIN || activeBehavior == BEHAVIOR_TARGET_DEW) {
         if (k == 0) sum += 1.4; // Strong forward cruise thrust
         if (k == 3) sum += 1.6; // Voluntary takeoff jump if landed
       }
@@ -281,7 +314,7 @@ class FlyBrain {
       outputs[k] = 1.0 / (1.0 + exp(-sum));
     }
 
-    // Sparks along nerves
+    // Nerve Action Potentials
     if (frameCount % 3 == 0) {
       if (inputs[2] > 0.3) {
         spikes.add(new ActionPotential(0, 3, color(255, 60, 60), 2.4));
@@ -304,93 +337,308 @@ class FlyBrain {
     }
   }
 
-  // Model Behavior Deliberation: Evaluates internal states & memory
-  void deliberateModelBehavior(PVector flyPos, float flyHeading, float flyTemp, int flyState, boolean isFemale) {
-    // 1. Giant Fiber Looming Shadow (Survival reflex overrides everything)
-    if (inputs[2] > 0.32) {
+  // ---------------------------------------------------------------------------
+  // Sigmoidal Drive Valuation & Stimulus Flight Direction
+  // ---------------------------------------------------------------------------
+  void evaluateSigmoidalNeedsAndDirection(PVector flyPos, float flyHeading, float flyTemp, int flyState, 
+                                          boolean isFemale, Environment env, PVector wind, 
+                                          float carbOdor, float proteinOdor, float pheromone, float loom) {
+    // 1. Calculate Sigmoidal Need Potentials
+    driveEscape = sigmoid(loom, 16.0, 0.28) * 12.0;
+    driveSugar = sigmoid(inputs[9], 8.5, 0.38) * (1.0 + 0.65 * memSugarConf);
+    driveProtein = isFemale ? (sigmoid(inputs[10], 8.5, 0.35) * (1.0 + 0.65 * memProteinConf)) : 0.0;
+    driveDew = sigmoid(inputs[11], 9.0, 0.42) * (1.0 + 0.50 * memDewConf);
+    driveWarmth = sigmoid(23.2 - flyTemp, 3.2, 2.4);
+    driveMate = (!isFemale) ? sigmoid(pheromone, 7.5, 0.30) : 0.0;
+    driveGroom = sigmoid(1.0 - inputs[6], 8.0, 0.52);
+
+    // 2. Behavioral Priority Arbitration
+    if (driveEscape > 2.0) {
       activeBehavior = BEHAVIOR_ESCAPE;
       activeTarget = null;
-      targetDescription = "EVADE SHADOW";
+      targetDescription = "EVADE THREAT";
+      stimulusStrategy = "GIANT FIBER JUMP AWAY";
+      stimulusDirection.set(-cos(flyHeading), -sin(flyHeading), 0.8);
+      stimulusDirection.normalize();
       currentThought = "! GIANT FIBER EVASIVE ESCAPE !";
       thoughtColor = color(255, 45, 45);
+      epigeneticMarks[EPI_VIGILANCE] = min(1.0, epigeneticMarks[EPI_VIGILANCE] + 0.001);
       return;
     }
 
-    // 2. Feeding on Food Contact
     if (flyState == 4 || inputs[6] > 0.5) { // STATE_FEEDING
       activeBehavior = BEHAVIOR_FEEDING;
       activeTarget = null;
-      targetDescription = "FEEDING PROBOSCIS";
+      targetDescription = "FEEDING";
+      stimulusStrategy = "PROBOSCIS CONTACT";
       currentThought = "PROBOSCIS SUCROSE INGESTION";
       thoughtColor = color(255, 205, 50);
       return;
     }
 
-    // 3. Poikilothermy: Cold fly targets warm ceiling perch
-    if (flyTemp < 21.0 && memPerchLoc != null) {
+    // Dominant competitive need
+    float maxDrive = max(driveSugar, max(driveProtein, max(driveDew, max(driveWarmth, max(driveMate, driveGroom)))));
+
+    if (maxDrive < 0.22) {
+      activeBehavior = BEHAVIOR_CRUISE;
+      activeTarget = null;
+      targetDescription = "SURVEYING ARENA";
+      stimulusStrategy = "INTER-SACCADIC CRUISE";
+      stimulusDirection.set(cos(flyHeading), sin(flyHeading), 0);
+      currentThought = "STEADY CRUISE & SURVEY";
+      thoughtColor = color(150, 210, 255);
+      return;
+    }
+
+    // 3. Fulfill Dominant Need & Calculate Flight Vector to Stimulus
+    if (maxDrive == driveSugar) {
+      activeBehavior = BEHAVIOR_TARGET_SUGAR;
+      epigeneticMarks[EPI_SUCROSE] = min(1.0, epigeneticMarks[EPI_SUCROSE] + 0.0002);
+
+      if (memSugarLoc != null && memSugarConf > 0.2) {
+        activeTarget = memSugarLoc;
+        targetDescription = "SUCROSE (" + int(memSugarConf * 100) + "%)";
+        stimulusStrategy = "WORKING MEMORY LOCK";
+        stimulusDirection = PVector.sub(memSugarLoc, flyPos);
+        stimulusDirection.normalize();
+      } else if (carbOdor > 0.06) {
+        activeTarget = null;
+        targetDescription = "SUGAR ODOR PLUME";
+        stimulusStrategy = "UPWIND ANEMOTAXIS SURGE";
+        stimulusDirection.set(-wind.x, -wind.y, -wind.z * 0.4);
+        stimulusDirection.normalize();
+      } else {
+        activeTarget = null;
+        targetDescription = "FORAGING SUCROSE";
+        stimulusStrategy = "CROSSWIND CASTING SWEEP";
+        float castSide = (sin(frameCount * 0.03 + internalCompassAngle) > 0) ? 1.0 : -1.0;
+        stimulusDirection.set(-wind.y * castSide, wind.x * castSide, random(-0.2, 0.2));
+        stimulusDirection.normalize();
+      }
+      currentThought = "SUGAR NEED: " + stimulusStrategy;
+      thoughtColor = color(255, 215, 60);
+
+    } else if (maxDrive == driveProtein) {
+      activeBehavior = BEHAVIOR_TARGET_PROTEIN;
+      epigeneticMarks[EPI_PROTEIN] = min(1.0, epigeneticMarks[EPI_PROTEIN] + 0.0002);
+
+      if (memProteinLoc != null && memProteinConf > 0.2) {
+        activeTarget = memProteinLoc;
+        targetDescription = "YEAST SUBSTRATE";
+        stimulusStrategy = "WORKING MEMORY LOCK";
+        stimulusDirection = PVector.sub(memProteinLoc, flyPos);
+        stimulusDirection.normalize();
+      } else if (proteinOdor > 0.06) {
+        activeTarget = null;
+        targetDescription = "YEAST PLUME";
+        stimulusStrategy = "UPWIND ANEMOTAXIS SURGE";
+        stimulusDirection.set(-wind.x, -wind.y, -wind.z * 0.4);
+        stimulusDirection.normalize();
+      } else {
+        activeTarget = null;
+        targetDescription = "SEARCHING PROTEIN";
+        stimulusStrategy = "CROSSWIND CASTING SWEEP";
+        float castSide = (sin(frameCount * 0.035) > 0) ? 1.0 : -1.0;
+        stimulusDirection.set(-wind.y * castSide, wind.x * castSide, random(-0.2, 0.2));
+        stimulusDirection.normalize();
+      }
+      currentThought = "OOGENESIS PROTEIN: " + stimulusStrategy;
+      thoughtColor = color(235, 75, 140);
+
+    } else if (maxDrive == driveDew) {
+      activeBehavior = BEHAVIOR_TARGET_DEW;
+      if (memDewLoc != null && memDewConf > 0.2) {
+        activeTarget = memDewLoc;
+        targetDescription = "GLASS DEW";
+        stimulusStrategy = "WORKING MEMORY LOCK";
+        stimulusDirection = PVector.sub(memDewLoc, flyPos);
+        stimulusDirection.normalize();
+      } else {
+        activeTarget = null;
+        targetDescription = "GLASS MOISTURE";
+        stimulusStrategy = "PERIMETER WALL HEADING";
+        float wallX = (flyPos.x > 0) ? env.cubeW * 0.48 : -env.cubeW * 0.48;
+        stimulusDirection.set(wallX - flyPos.x, 0, random(-0.15, 0.15));
+        stimulusDirection.normalize();
+      }
+      currentThought = "THIRST: " + stimulusStrategy;
+      thoughtColor = color(70, 210, 240);
+
+    } else if (maxDrive == driveWarmth) {
       activeBehavior = BEHAVIOR_TARGET_PERCH;
       activeTarget = memPerchLoc;
       targetDescription = "WARM PERCH";
-      currentThought = "THERMAL BASKING: TARGETING WARM CEILING";
+      stimulusStrategy = "THERMOTACTIC UPWARD ASCENT";
+      stimulusDirection.set(env.lightPos.x - flyPos.x, env.lightPos.y - flyPos.y, env.cubeH - flyPos.z);
+      stimulusDirection.normalize();
+      currentThought = "BASKING: ASCENDING TO WARM CEILING";
       thoughtColor = color(255, 180, 70);
-      return;
-    }
 
-    // 4. Thirsty fly targets remembered condensation dew on glass
-    if (inputs[11] > 0.45 && memDewLoc != null && memDewConf > 0.2) {
-      activeBehavior = BEHAVIOR_TARGET_DEW;
-      activeTarget = memDewLoc;
-      targetDescription = "GLASS DEW (" + int(memDewConf * 100) + "%)";
-      currentThought = "HYDRATION: FLYING STRAIGHT TO DEW";
-      thoughtColor = color(70, 210, 240);
-      return;
-    }
-
-    // 5. Female Gravid with Eggs targets remembered protein substrate
-    if (isFemale && inputs[10] > 0.45 && memProteinLoc != null && memProteinConf > 0.2) {
-      activeBehavior = BEHAVIOR_TARGET_PROTEIN;
-      activeTarget = memProteinLoc;
-      targetDescription = "YEAST SUBSTRATE (" + int(memProteinConf * 100) + "%)";
-      currentThought = "OOGENESIS: DIRECT FLIGHT TO YEAST";
-      thoughtColor = color(235, 75, 140);
-      return;
-    }
-
-    // 6. Hungry fly targets remembered sugar location
-    if (inputs[9] > 0.35 && memSugarLoc != null && memSugarConf > 0.2) {
-      activeBehavior = BEHAVIOR_TARGET_SUGAR;
-      activeTarget = memSugarLoc;
-      targetDescription = "SUCROSE (" + int(memSugarConf * 100) + "%)";
-      currentThought = "HUNGER: DIRECT FLIGHT TO REMEMBERED SUGAR";
-      thoughtColor = color(255, 215, 60);
-      return;
-    }
-
-    // 7. Male Courtship
-    if (!isFemale && inputs[5] > 0.45) {
+    } else if (maxDrive == driveMate) {
       activeBehavior = BEHAVIOR_COURTSHIP;
-      targetDescription = "FEMALE PHEROMONE";
-      currentThought = "COURTSHIP PURSUIT & 165 HZ WING SERENADE";
+      activeTarget = null;
+      targetDescription = "PHEROMONE TRAIL";
+      stimulusStrategy = "UPWIND PHEROMONE PURSUIT";
+      stimulusDirection.set(-wind.x, -wind.y, random(-0.2, 0.2));
+      stimulusDirection.normalize();
+      currentThought = "COURTSHIP PURSUIT & 165 HZ WING BUZZ";
       thoughtColor = color(140, 110, 255);
-      return;
-    }
 
-    // 8. Grooming when dusty
-    if (flyState == 5) { // STATE_GROOMING
+    } else {
       activeBehavior = BEHAVIOR_GROOMING;
       activeTarget = null;
       targetDescription = "HYGIENE";
-      currentThought = "GROOMING COMPOUND EYES & LEGS";
+      stimulusStrategy = "SYSTEMATIC CLEANING";
+      stimulusDirection.set(0, 0, 0);
+      currentThought = "GROOMING SENSORY BRISTLES";
       thoughtColor = color(80, 230, 130);
-      return;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Adaptive Aero-Navigation & Plasticity Controller
+  // ---------------------------------------------------------------------------
+  void updateAirNavigation(Fly fly, Environment env, PVector wind) {
+    // 1. Sensed Aerodynamic Variables
+    float targetTrackYaw = atan2(stimulusDirection.y, stimulusDirection.x);
+    float crosswind = wind.x * sin(targetTrackYaw) - wind.y * cos(targetTrackYaw);
+    float groundSpeed = sqrt(fly.vel.x * fly.vel.x + fly.vel.y * fly.vel.y);
+    float actualTrackYaw = atan2(fly.vel.y, fly.vel.x);
+    airSlip = atan2(sin(fly.heading - actualTrackYaw), cos(fly.heading - actualTrackYaw));
+
+    // 2. Compute Learned Crab-Angle Compensation
+    float estimatedThrust = max(1.5, groundSpeed);
+    float idealCrab = -crosswind / estimatedThrust;
+    idealCrab = constrain(idealCrab, -0.75, 0.75);
+
+    crabAngle = lerp(crabAngle, idealCrab * wCrabComp, 0.14);
+    pitchTrim = lerp(pitchTrim, -wind.z * 0.18 * wPitchTrim, 0.12);
+
+    // 3. Evaluate Ground Track Alignment
+    PVector groundTrack2D = new PVector(fly.vel.x, fly.vel.y);
+    PVector targetDir2D = new PVector(stimulusDirection.x, stimulusDirection.y);
+    if (groundTrack2D.mag() > 0.1 && targetDir2D.mag() > 0.1) {
+      groundTrack2D.normalize();
+      targetDir2D.normalize();
+      groundTrackAlignment = groundTrack2D.dot(targetDir2D);
+    } else {
+      groundTrackAlignment = 0.5;
     }
 
-    // 9. Default Model: Steady, smooth inter-saccadic cruising
-    activeBehavior = BEHAVIOR_CRUISE;
-    activeTarget = null;
-    targetDescription = "SURVEYING ARENA";
-    currentThought = "STEADY CRUISE & COMPOUND RETINA SURVEY";
-    thoughtColor = color(150, 210, 255);
+    // 4. Hebbian / Reinforcement Plasticity for Aero-Navigation
+    if (groundTrackAlignment > 0.6) {
+      float alignmentReward = 0.04 * groundTrackAlignment;
+      dopamineReward += alignmentReward;
+      cumulativeReward += alignmentReward;
+
+      float crabError = abs(idealCrab - crabAngle);
+      wCrabComp = constrain(wCrabComp + 0.0008 * (1.0 - crabError), 0.08, 1.25);
+      wPitchTrim = constrain(wPitchTrim + 0.0006, 0.08, 1.20);
+      wGyroDamping = constrain(wGyroDamping + 0.0005, 0.10, 1.0);
+
+      aeroSkill = min(1.0, aeroSkill + 0.00018);
+      epigeneticMarks[EPI_AERO] = min(1.0, epigeneticMarks[EPI_AERO] + 0.00022);
+    }
+
+    // Thermal updraft fuel bonus: riding rising air saves trehalose!
+    if (wind.z > 0.3) {
+      fly.trehalose = min(1.0, fly.trehalose + 0.00015);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Transgenerational Epigenetics & Speciation Divergence
+  // ---------------------------------------------------------------------------
+  FlyBrain mutateCopyWithEpigenetics(FlyBrain motherBrain, FlyBrain fatherBrain) {
+    FlyBrain child = new FlyBrain();
+
+    // 1. Neural Network Weight Mutation (Genetic substrate)
+    for (int i = 0; i < NUM_INPUTS; i++) {
+      for (int j = 0; j < NUM_HIDDEN; j++) {
+        float baseW = (fatherBrain != null) ? lerp(motherBrain.wInputHidden[i][j], fatherBrain.wInputHidden[i][j], 0.5) : motherBrain.wInputHidden[i][j];
+        child.wInputHidden[i][j] = baseW + random(-0.035, 0.035);
+      }
+    }
+    for (int i = 0; i < NUM_HIDDEN; i++) {
+      for (int j = 0; j < NUM_HIDDEN; j++) {
+        float baseW = (fatherBrain != null) ? lerp(motherBrain.wHiddenHidden[i][j], fatherBrain.wHiddenHidden[i][j], 0.5) : motherBrain.wHiddenHidden[i][j];
+        child.wHiddenHidden[i][j] = baseW + random(-0.025, 0.025);
+      }
+      for (int k = 0; k < NUM_OUTPUTS; k++) {
+        float baseW = (fatherBrain != null) ? lerp(motherBrain.wHiddenOutput[i][k], fatherBrain.wHiddenOutput[i][k], 0.5) : motherBrain.wHiddenOutput[i][k];
+        child.wHiddenOutput[i][k] = baseW + random(-0.035, 0.035);
+      }
+    }
+
+    // 2. Generation & Epigenetic Transmission
+    int parentGen = max(motherBrain.generation, (fatherBrain != null) ? fatherBrain.generation : motherBrain.generation);
+    child.generation = parentGen + 1;
+
+    for (int m = 0; m < NUM_EPI_MARKS; m++) {
+      float mVal = motherBrain.epigeneticMarks[m];
+      float fVal = (fatherBrain != null) ? fatherBrain.epigeneticMarks[m] : mVal;
+      child.epigeneticMarks[m] = constrain(lerp(mVal, fVal, 0.5) * 0.94 + random(-0.02, 0.05), 0.05, 1.0);
+    }
+
+    // 3. Experiential Priming: Offspring Born with Acquired Experience!
+    child.inheritedAeroSkill = child.epigeneticMarks[EPI_AERO] * 0.75;
+    child.aeroSkill = max(0.14, child.inheritedAeroSkill);
+    child.wCrabComp = lerp(0.18, 0.95, child.epigeneticMarks[EPI_AERO]);
+    child.wPitchTrim = lerp(0.18, 0.90, child.epigeneticMarks[EPI_AERO]);
+    child.wGyroDamping = lerp(0.22, 0.85, child.epigeneticMarks[EPI_AERO]);
+
+    if (child.epigeneticMarks[EPI_SUCROSE] > 0.35) {
+      child.wInputHidden[3][0] += 0.8;
+    }
+    if (child.epigeneticMarks[EPI_PROTEIN] > 0.35) {
+      child.wInputHidden[4][1] += 0.8;
+    }
+    if (child.epigeneticMarks[EPI_VIGILANCE] > 0.32) {
+      child.wInputHidden[2][3] += 1.2;
+    }
+
+    // 4. Speciation Classifier
+    child.evaluateSpeciation();
+
+    return child;
+  }
+
+  void evaluateSpeciation() {
+    float aero = epigeneticMarks[EPI_AERO];
+    float sucrose = epigeneticMarks[EPI_SUCROSE];
+    float protein = epigeneticMarks[EPI_PROTEIN];
+    float vigilance = epigeneticMarks[EPI_VIGILANCE];
+
+    if (aero > 0.45 && aero >= sucrose && aero >= protein && aero >= vigilance) {
+      speciesName = "Musca d. aeronavis";
+      subspecies = "aeronavis (Turbulence Glider)";
+      speciesChitinColor = color(50, 80, 115);
+      wingAspectMod = 1.18;
+
+    } else if (sucrose > 0.45 && sucrose >= aero && sucrose >= protein && sucrose >= vigilance) {
+      speciesName = "Musca d. vorax";
+      subspecies = "vorax (Sucrose Forager)";
+      speciesChitinColor = color(100, 75, 40);
+      wingAspectMod = 1.0;
+
+    } else if (protein > 0.45 && protein >= aero && protein >= sucrose && protein >= vigilance) {
+      speciesName = "Musca d. fecundis";
+      subspecies = "fecundis (Vitellogenic Breeder)";
+      speciesChitinColor = color(95, 45, 65);
+      wingAspectMod = 0.95;
+
+    } else if (vigilance > 0.38) {
+      speciesName = "Musca d. vigilans";
+      subspecies = "vigilans (Hyper-Vigilant)";
+      speciesChitinColor = color(25, 28, 34);
+      wingAspectMod = 1.05;
+
+    } else {
+      speciesName = "Musca domestica";
+      subspecies = "typica (Generalist)";
+      speciesChitinColor = color(55, 60, 68);
+      wingAspectMod = 1.0;
+    }
   }
 
   boolean hasActiveTarget() {
@@ -412,7 +660,7 @@ class FlyBrain {
   }
 
   // ---------------------------------------------------------------------------
-  // Right HUD Panel: Spatial Memory, Ring Attractor & Learning Oscilloscope
+  // Right HUD Panel: Spatial Memory, Epigenetics, CX Compass & Learning Oscilloscope
   // ---------------------------------------------------------------------------
   void displayLearningHUD(float px, float py, float pw, float ph) {
     pushStyle();
@@ -421,10 +669,9 @@ class FlyBrain {
     strokeWeight(1);
     rect(px, py, pw, ph);
 
-    // Title
     fill(180, 225, 255);
     textAlign(LEFT, TOP);
-    text("COGNITIVE MEMORY & CENTRAL COMPLEX", px + 8, py + 8);
+    text("COGNITIVE CENTRAL COMPLEX & EPIGENETICS", px + 8, py + 8);
 
     if (dopamineReward > 0.05) {
       fill(255, 215, 50);
@@ -435,16 +682,15 @@ class FlyBrain {
       text("+DOPAMINE", px + pw - 48, py + 12);
     }
 
-    // Spatial Memory readout
-    fill(130, 180, 225);
+    fill(130, 185, 235);
     textAlign(LEFT, TOP);
-    text("TARGET: " + targetDescription + "  |  HITS: " + foodFoundCount + "  |  REW: " + nf(cumulativeReward, 0, 1), px + 8, py + 22);
+    text("GEN: F" + generation + "  |  " + subspecies, px + 8, py + 22);
+    text("STRATEGY: " + stimulusStrategy + " (" + targetDescription + ")", px + 8, py + 34);
 
-    // Pixel Oscilloscope
     float oscX = px + 8;
-    float oscY = py + 36;
-    float oscW = pw - 85;
-    float oscH = 46;
+    float oscY = py + 48;
+    float oscW = pw - 90;
+    float oscH = 42;
 
     fill(6, 10, 16);
     stroke(40, 70, 105);
@@ -470,22 +716,21 @@ class FlyBrain {
     textAlign(LEFT, TOP);
     text("REWARD OSCILLOSCOPE", oscX + 4, oscY + 3);
 
-    // Central Complex Ring Attractor
-    float ringX = px + pw - 42;
-    float ringY = py + 59;
+    float ringX = px + pw - 44;
+    float ringY = py + 69;
 
     fill(6, 10, 16);
     stroke(40, 70, 105);
-    rect(ringX - 35, py + 36, 70, oscH);
+    rect(ringX - 35, oscY, 70, oscH);
 
     fill(160, 195, 230);
     textAlign(CENTER, TOP);
-    text("RING CX", ringX, py + 38);
+    text("RING CX", ringX, oscY + 2);
 
     for (int i = 0; i < 8; i++) {
       float a = map(i, 0, 8, 0, TWO_PI) - HALF_PI;
-      float wx = ringX + cos(a) * 14;
-      float wy = (ringY + 6) + sin(a) * 11;
+      float wx = ringX + cos(a) * 13;
+      float wy = (ringY + 4) + sin(a) * 10;
       fill(lerpColor(color(20, 35, 50), color(90, 220, 255), ringAttractor[i]));
       noStroke();
       rect(wx - 2, wy - 2, 4, 4);
@@ -493,11 +738,19 @@ class FlyBrain {
 
     stroke(255, 205, 50);
     strokeWeight(1.5);
-    line(ringX, ringY + 6, ringX + cos(internalCompassAngle - HALF_PI) * 12, (ringY + 6) + sin(internalCompassAngle - HALF_PI) * 10);
+    line(ringX, ringY + 4, ringX + cos(internalCompassAngle - HALF_PI) * 11, (ringY + 4) + sin(internalCompassAngle - HALF_PI) * 9);
 
-    // Active Synapses
-    float netStartY = py + 92;
-    float netH = ph - 100;
+    float aeroY = py + 94;
+    fill(140, 180, 220);
+    textAlign(LEFT, TOP);
+    text("AERO SKILL: " + int(aeroSkill * 100) + "% (INHERITED +" + int(inheritedAeroSkill * 100) + "%) | CRAB: " + nf(degrees(crabAngle), 0, 1) + " DEG", px + 8, aeroY);
+
+    float epiY = aeroY + 14;
+    fill(100, 190, 240);
+    text("EPI-AERO:" + int(epigeneticMarks[EPI_AERO] * 100) + "%  SUC:" + int(epigeneticMarks[EPI_SUCROSE] * 100) + "%  PROT:" + int(epigeneticMarks[EPI_PROTEIN] * 100) + "%  VIG:" + int(epigeneticMarks[EPI_VIGILANCE] * 100) + "%", px + 8, epiY);
+
+    float netStartY = epiY + 16;
+    float netH = ph - (netStartY - py) - 8;
     float colInX = px + 10;
     float colMidX = px + pw * 0.44;
     float colOutX = px + pw - 12;
@@ -510,7 +763,7 @@ class FlyBrain {
           float y2 = map(j, 0, NUM_HIDDEN - 1, netStartY + 4, netStartY + netH - 4);
           float w = wInputHidden[i][j];
           if (abs(w) > 0.4) {
-            stroke(w > 0 ? color(70, 210, 110, 140) : color(240, 70, 70, 140));
+            stroke(w > 0 ? color(70, 210, 110, 130) : color(240, 70, 70, 130));
             line(colInX + 4, y1, colMidX - 4, y2);
           }
         }
@@ -525,7 +778,7 @@ class FlyBrain {
           float y3 = map(k, 0, NUM_OUTPUTS - 1, netStartY, netStartY + netH);
           float w = wHiddenOutput[j][k];
           if (abs(w) > 0.35) {
-            stroke(w > 0 ? color(90, 230, 140, 160) : color(240, 90, 90, 160));
+            stroke(w > 0 ? color(90, 230, 140, 150) : color(240, 90, 90, 150));
             line(colMidX + 4, y2, colOutX - 4, y3);
           }
         }
