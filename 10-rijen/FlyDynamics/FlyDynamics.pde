@@ -185,6 +185,15 @@ void displayBottomInspector(Fly f) {
   textAlign(CENTER, CENTER);
   text(f.brain.currentThought, col2X + col2W - 129, bottomY + 12);
 
+  // Dedicated Simple Reasoning Layer Badge (Central Complex FB Deliberation)
+  fill(16, 26, 40, 230);
+  stroke(65, 125, 195, 180);
+  strokeWeight(1);
+  rect(col2X + 10, bottomY + 23, col2W - 20, 13);
+  fill(160, 225, 255);
+  textAlign(LEFT, CENTER);
+  text("REASONING: " + f.brain.reasoningVerdict, col2X + 14, bottomY + 28);
+
   // Draw the Detailed Pixel-Art Fly Diagram (1:1 UNSCALED - Fonts match perfectly!)
   float diagramCenterX = col2X + 155;
   float diagramCenterY = bottomY + bottomH * 0.54;
@@ -192,7 +201,7 @@ void displayBottomInspector(Fly f) {
 
   // Draw Specimen Bio-Status Meters (Right side inside column 2)
   float metersX = col2X + 320;
-  float metersY = bottomY + 34;
+  float metersY = bottomY + 40;
   float metersW = col2W - 335;
 
   fill(170, 205, 240);

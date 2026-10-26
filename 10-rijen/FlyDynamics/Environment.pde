@@ -77,8 +77,8 @@ class Environment {
     poiList.add(new PointOfInterest(new PVector(-cubeW * 0.48, -60, 90), "Water Droplets (Glass)", color(80, 200, 255), POI_WATER));
     // 2. Warm ceiling perch wire (thermoregulation basking)
     poiList.add(new PointOfInterest(new PVector(0, 0, cubeH - 12), "Warm Ceiling Wire", color(255, 190, 80), POI_WARM));
-    // 3. Sunny glass corner
-    poiList.add(new PointOfInterest(new PVector(-cubeW * 0.44, cubeD * 0.44, 130), "Warm Glass Corner", color(255, 230, 140), POI_GLASS));
+    // 3. Sunny observation perch (in open arena)
+    poiList.add(new PointOfInterest(new PVector(-cubeW * 0.22, cubeD * 0.22, 140), "Observation Perch", color(255, 230, 140), POI_GLASS));
 
     // Initial Foods:
     // Sugar drop (Carbohydrate for instant flight fuel)

@@ -111,6 +111,22 @@ class FlyBrain {
   float airSlip = 0.0;             // Sensed crosswind slip angle (radians)
   float groundTrackAlignment = 0.0;// Alignment of velocity with stimulus direction
 
+  // SIMPLE REASONING LAYER (Central Complex Fan-Shaped Body Deliberation)
+  final int TACTIC_DIRECT = 0;       // Direct feasible execution
+  final int TACTIC_CORNER_ESCAPE = 1;// Corner confinement detected -> Escape to arena center
+  final int TACTIC_TACK_EDDY = 2;    // Counter-eddy opposing track -> Tack around vortex
+  final int TACTIC_CONSERVE_FUEL = 3;// Fuel insufficient for flight -> Low-altitude glide/crawl
+  final int TACTIC_FALSIFY = 4;      // Resource absent at memory site -> Invalidate belief & cast plume
+  
+  int reasoningTactic = TACTIC_DIRECT;
+  String reasoningVerdict = "FEASIBLE: ASSESSING TERRARIUM";
+  float targetFeasibility = 1.0;
+  float estimatedFuelCost = 0.0;
+  float cornerTrapTimer = 0.0;
+  float stallTimer = 0.0;
+  float prevDistToGoal = 9999.0;
+  boolean shouldForceTakeoff = false;
+
   // Transgenerational Epigenetics & Speciation
   float[] epigeneticMarks = new float[NUM_EPI_MARKS];
   int generation = 0;
@@ -249,7 +265,7 @@ class FlyBrain {
                        float pheromone, float tarsalSugar, float haltereGyro, float compass, 
                        float hunger, float eggUrge, float thirst, 
                        PVector flyPos, float flyHeading, float flyTemp, int flyState, boolean isFemale,
-                       Environment env, PVector wind) {
+                       Environment env, PVector wind, float trehalose) {
     // 1. Sensory Influx
     inputs[0] = visL;
     inputs[1] = visR;
@@ -298,7 +314,10 @@ class FlyBrain {
     // 4. Sigmoidal Need Decision & Stimulus Direction Calculation
     evaluateSigmoidalNeedsAndDirection(flyPos, flyHeading, flyTemp, flyState, isFemale, env, wind, carbOdor, proteinOdor, pheromone, loom);
 
-    // 5. Motor Outputs
+    // 5. Simple Reasoning Layer: Evaluates Confinement, Cost Feasibility & Beliefs
+    runReasoningLayer(flyPos, flyHeading, flyTemp, flyState, isFemale, env, wind, trehalose);
+
+    // 6. Motor Outputs
     for (int k = 0; k < NUM_OUTPUTS; k++) {
       float sum = 0;
       for (int j = 0; j < NUM_HIDDEN; j++) {
@@ -309,6 +328,10 @@ class FlyBrain {
       if (hasActiveTarget() || activeBehavior == BEHAVIOR_TARGET_SUGAR || activeBehavior == BEHAVIOR_TARGET_PROTEIN || activeBehavior == BEHAVIOR_TARGET_DEW) {
         if (k == 0) sum += 1.4; // Strong forward cruise thrust
         if (k == 3) sum += 1.6; // Voluntary takeoff jump if landed
+      }
+
+      if (shouldForceTakeoff) {
+        if (k == 3) sum += 3.8; // Force jump takeoff to escape corner trap
       }
 
       outputs[k] = 1.0 / (1.0 + exp(-sum));
@@ -493,6 +516,129 @@ class FlyBrain {
       currentThought = "GROOMING SENSORY BRISTLES";
       thoughtColor = color(80, 230, 130);
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Simple Reasoning Layer (Central Complex FB: Confinement, Feasibility & Beliefs)
+  // ---------------------------------------------------------------------------
+  void runReasoningLayer(PVector flyPos, float flyHeading, float flyTemp, int flyState, 
+                         boolean isFemale, Environment env, PVector wind, float trehalose) {
+    shouldForceTakeoff = false;
+
+    // 1. Survival Check: Looming Threat Override
+    if (inputs[2] > 0.3) {
+      reasoningTactic = TACTIC_DIRECT;
+      reasoningVerdict = "SURVIVAL: Looming threat -> Catapult escape jump.";
+      return;
+    }
+
+    // 2. Corner Trap & Spatial Confinement Reasoning:
+    // Prevents flies from accumulating or stopping at terrarium corners!
+    float distLeft = flyPos.x - (-env.cubeW * 0.5);
+    float distRight = env.cubeW * 0.5 - flyPos.x;
+    float distBack = flyPos.y - (-env.cubeD * 0.5);
+    float distFront = env.cubeD * 0.5 - flyPos.y;
+
+    boolean inCorner = (min(distLeft, distRight) < 70 && min(distBack, distFront) < 70);
+
+    if (inCorner) {
+      cornerTrapTimer += 0.016;
+      reasoningTactic = TACTIC_CORNER_ESCAPE;
+      reasoningVerdict = "CORNER TRAP: Corner confinement -> Repelling to arena center.";
+      thoughtColor = color(255, 130, 40);
+
+      // Force flight vector straight into the open arena center with upward lift:
+      stimulusDirection.set(-flyPos.x * 0.8, -flyPos.y * 0.8, max(40, 160 - flyPos.z));
+      stimulusDirection.normalize();
+      stimulusStrategy = "CORNER ESCAPE TO CENTER";
+
+      // If fly is crawling/resting in a corner for more than 0.3s, force immediate voluntary takeoff!
+      if (flyState != 0) { // Not flying
+        shouldForceTakeoff = true;
+      }
+      return;
+    } else {
+      cornerTrapTimer = max(0, cornerTrapTimer - 0.05);
+    }
+
+    // 3. Belief Validation (False Expectation Mismatch):
+    if (activeTarget != null) {
+      float distToTarget = dist(flyPos.x, flyPos.y, flyPos.z, activeTarget.x, activeTarget.y, activeTarget.z);
+      if (distToTarget < 30) {
+        boolean foodFound = false;
+        for (Food f : env.foods) {
+          if (PVector.dist(f.pos, activeTarget) < 36) {
+            foodFound = true;
+            break;
+          }
+        }
+        if (!foodFound && (activeBehavior == BEHAVIOR_TARGET_SUGAR || activeBehavior == BEHAVIOR_TARGET_PROTEIN)) {
+          reasoningTactic = TACTIC_FALSIFY;
+          reasoningVerdict = "BELIEF FALSIFIED: Resource depleted at site -> Invalidate memory & cast plume.";
+          thoughtColor = color(240, 100, 100);
+
+          if (activeBehavior == BEHAVIOR_TARGET_SUGAR) {
+            memSugarConf = 0.0;
+            memSugarLoc = null;
+          } else {
+            memProteinConf = 0.0;
+            memProteinLoc = null;
+          }
+          activeTarget = null;
+          stimulusStrategy = "CROSSWIND PLUME CASTING";
+          float castSide = (sin(frameCount * 0.04) > 0) ? 1.0 : -1.0;
+          stimulusDirection.set(-wind.y * castSide, wind.x * castSide, random(-0.2, 0.2));
+          stimulusDirection.normalize();
+          return;
+        }
+      }
+    }
+
+    // 4. Energy Feasibility & Cost-Benefit Check:
+    float targetDist = (activeTarget != null) ? PVector.dist(flyPos, activeTarget) : 180.0;
+    float headwind = wind.x * (-stimulusDirection.x) + wind.y * (-stimulusDirection.y);
+    estimatedFuelCost = targetDist * 0.0011 * (1.0 + max(0, headwind) * 0.45);
+
+    if (trehalose < estimatedFuelCost && trehalose < 0.26) {
+      targetFeasibility = trehalose / max(0.01, estimatedFuelCost);
+      reasoningTactic = TACTIC_CONSERVE_FUEL;
+      reasoningVerdict = "FUEL DEFICIT: Cost " + nf(estimatedFuelCost, 0, 2) + " > Treh " + nf(trehalose, 0, 2) + " -> Low altitude crawl foraging.";
+      thoughtColor = color(255, 175, 50);
+
+      stimulusDirection.z = -0.4;
+      stimulusDirection.normalize();
+      return;
+    } else {
+      targetFeasibility = 1.0;
+    }
+
+    // 5. Stagnation / Eddy Opposition Check:
+    if (flyState == 0) { // STATE_FLYING
+      float curDist = (activeTarget != null) ? PVector.dist(flyPos, activeTarget) : 120.0;
+      float progress = prevDistToGoal - curDist;
+      if (progress < 0.10 && activeBehavior != BEHAVIOR_CRUISE) {
+        stallTimer += 0.016;
+        if (stallTimer > 1.3) {
+          reasoningTactic = TACTIC_TACK_EDDY;
+          reasoningVerdict = "TURBULENCE STALL: Counter-eddy opposing track -> Tacking 35 deg around vortex.";
+          thoughtColor = color(100, 210, 255);
+
+          float tackAng = radians(35);
+          float nx = stimulusDirection.x * cos(tackAng) - stimulusDirection.y * sin(tackAng);
+          float ny = stimulusDirection.x * sin(tackAng) + stimulusDirection.y * cos(tackAng);
+          stimulusDirection.set(nx, ny, -0.1);
+          stimulusDirection.normalize();
+          return;
+        }
+      } else {
+        stallTimer = max(0, stallTimer - 0.04);
+      }
+      prevDistToGoal = curDist;
+    }
+
+    // 6. Feasible Direct Execution
+    reasoningTactic = TACTIC_DIRECT;
+    reasoningVerdict = "FEASIBLE: Track +" + nf(groundTrackAlignment, 0, 2) + " | Cost " + nf(estimatedFuelCost, 0, 2) + " < Budget " + nf(trehalose, 0, 2);
   }
 
   // ---------------------------------------------------------------------------

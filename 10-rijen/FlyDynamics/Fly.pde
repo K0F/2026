@@ -220,7 +220,7 @@ class Fly {
 
     PVector wind = env.getWindAt(pos);
 
-    // 3. BRAIN COGNITIVE DELIBERATION (Thinking with spatial memory, needs & aero cues)
+    // 3. BRAIN COGNITIVE DELIBERATION (Thinking with spatial memory, needs, aero cues & reasoning)
     brain.computeThinking(
       vision.getLeftLuminance(),
       vision.getRightLuminance(),
@@ -240,8 +240,18 @@ class Fly {
       state,
       isFemale,
       env,
-      wind
+      wind,
+      trehalose
     );
+
+    // If Reasoning Layer detected corner trap, execute immediate voluntary escape takeoff:
+    if (brain.shouldForceTakeoff && state != STATE_FLYING && state != STATE_TAKEOFF) {
+      state = STATE_TAKEOFF;
+      stateTimer = 0;
+      heading = atan2(-pos.y, -pos.x);
+      vel.set(cos(heading) * 2.5, sin(heading) * 2.5, 2.8);
+      brain.shouldForceTakeoff = false;
+    }
 
     // 4. MOTOR STEERING & PROPORTIONAL TARGET GUIDANCE
     float wingThrustCmd = brain.outputs[0];
@@ -360,12 +370,26 @@ class Fly {
           heading += steerCmd * 0.06;
         }
 
+        // Corner confinement prevention during crawling
+        float distL = pos.x - (-env.cubeW * 0.5);
+        float distR = env.cubeW * 0.5 - pos.x;
+        float distB = pos.y - (-env.cubeD * 0.5);
+        float distF = env.cubeD * 0.5 - pos.y;
+        if (min(distL, distR) < 70 && min(distB, distF) < 70) {
+          heading = lerp(heading, atan2(-pos.y, -pos.x), 0.28);
+          if (landedDuration > 0.6) {
+            state = STATE_TAKEOFF;
+            stateTimer = 0;
+            vel.set(cos(heading) * 2.4, sin(heading) * 2.4, 2.6);
+          }
+        }
+
         pos.x += cos(heading) * crawlSpeed;
         pos.y += sin(heading) * crawlSpeed;
         tripodPhase += crawlSpeed * 0.45;
 
-        // Takeoff when rested or targeting memory
-        if ((landedDuration > 3.0 && trehalose > 0.25 && random(1.0) < 0.05) || (brain.hasActiveTarget() && trehalose > 0.15)) {
+        // Takeoff when rested or targeting memory (flies stay active!)
+        if ((landedDuration > 2.5 && random(1.0) < 0.08) || (brain.hasActiveTarget() && trehalose > 0.12)) {
           state = STATE_TAKEOFF;
           stateTimer = 0;
         }
@@ -511,9 +535,28 @@ class Fly {
     return (m == null) ? 999 : PVector.dist(pos, m.pos);
   }
 
-  // Robust Boundary Reflection (Prevents flies pinning to walls!)
+  // Robust Boundary Reflection & Smooth Corner Repulsion Field
   void keepInCube(Environment env) {
     float margin = 8;
+    float distLeft = pos.x - (-env.cubeW/2);
+    float distRight = env.cubeW/2 - pos.x;
+    float distBack = pos.y - (-env.cubeD/2);
+    float distFront = env.cubeD/2 - pos.y;
+
+    // Smooth boundary repulsion pushing towards arena center
+    float repThresh = 65;
+    if (distLeft < repThresh) acc.x += (repThresh - distLeft) * 0.045;
+    if (distRight < repThresh) acc.x -= (repThresh - distRight) * 0.045;
+    if (distBack < repThresh) acc.y += (repThresh - distBack) * 0.045;
+    if (distFront < repThresh) acc.y -= (repThresh - distFront) * 0.045;
+
+    // Corner extra repulsion: if near two walls, steer heading strongly towards arena center
+    if (min(distLeft, distRight) < 65 && min(distBack, distFront) < 65) {
+      heading = lerp(heading, atan2(-pos.y, -pos.x), 0.18);
+      acc.x += (-pos.x * 0.02);
+      acc.y += (-pos.y * 0.02);
+    }
+
     if (pos.z < 0) {
       pos.z = 0;
       if (state == STATE_FLYING) {
