@@ -1,5 +1,5 @@
 // =============================================================================
-// Fly.pde - Dipteran Biomechanics, Sexual Dimorphism, Metabolism & Lifecycle
+// Fly.pde - Dipteran Biomechanics, Flight Trails, Bioenergetics & Learning
 // =============================================================================
 
 // Behavioral States
@@ -16,49 +16,54 @@ class Fly {
   PVector pos;
   PVector vel;
   PVector acc;
-  float heading = 0; // Yaw angle (horizontal)
-  float pitch = 0;   // Vertical angle
-  float roll = 0;    // Banking roll angle
+  float heading = 0;
+  float pitch = 0;
+  float roll = 0;
+
+  // Flight trajectory trace (short fading ribbon)
+  ArrayList<PVector> flightTrail = new ArrayList<PVector>();
+  final int MAX_TRAIL_LENGTH = 22; // Not too long, elegant trace
 
   // Sexual Dimorphism
   boolean isFemale = true;
   float bodyScale = 1.0;
-  float abdomenScale = 1.0;
   
   // Oviposition & Vitellogenesis (Females)
-  float vitellogenesis = 0.0; // Protein conversion into mature eggs (0.0 to 1.0)
+  float vitellogenesis = 0.0;
   int matureEggs = 0;
-  float ovipositorExtension = 0; // 0 = retracted, 1 = extended
+  float ovipositorExtension = 0;
   
   // Courtship display (Males)
-  float courtshipWingAngle = 0; // Unilateral wing vibration angle (90 deg)
+  float courtshipWingAngle = 0;
   float courtshipBuzzPhase = 0;
   Fly targetMate = null;
 
-  // Behavior state machine
+  // Behavior state
   int state = STATE_FLYING;
   float stateTimer = 0;
 
-  // Biomechanics: Wings & Halteres
-  float wingFold = 1.0;          // 0.0 = folded flat on abdomen, 1.0 = deployed
-  float wingPhase = 0;           // High-frequency flapping phase
-  float wingFrequency = 180.0;   // In Hz (140 - 220 Hz depending on temperature)
-  float halterePhase = 0;        // Oscillating anti-phase to wings
+  // Biomechanics
+  float wingFold = 1.0;
+  float wingPhase = 0;
+  float wingFrequency = 185.0; // Hz
+  float halterePhase = 0;
 
-  // Biomechanics: 6 Legs with Alternating Tripod Gait
-  // Index: 0=L1(Front), 1=R1(Front), 2=L2(Mid), 3=R2(Mid), 4=L3(Hind), 5=R3(Hind)
+  // 6 Legs (Alternating Tripod Gait)
   PVector[] legBases = new PVector[6];
   PVector[] legTips = new PVector[6];
   float tripodPhase = 0;
-  int groomType = 0; // 0 = Head/Eyes, 1 = Wings/Abdomen
+  int groomType = 0;
   float groomPhase = 0;
 
   // Bioenergetics & Homeostasis
-  float trehalose = 0.85;  // Carbohydrate flight fuel (0.0 to 1.0)
-  float protein = 0.2;     // Protein store for eggs/larval nutrition
-  float hydration = 0.9;   // Water balance (desiccation risk)
-  float cleanliness = 0.95;// Sensor & tarsal pulvilli cleanliness (0.0 to 1.0)
-  float bodyTemp = 24.0;   // Body temperature in Celsius (ectotherm)
+  float trehalose = 0.85;  // Carbohydrate flight fuel
+  float protein = 0.2;     // Protein for vitellogenesis
+  float hydration = 0.9;   // Water balance
+  float cleanliness = 0.95;// Sensor cleanliness
+  float bodyTemp = 24.0;   // Ectothermic temperature (°C)
+
+  // Learning & Gradient Navigation tracking
+  float prevDistToFood = 9999;
 
   // Neuromorphic Brain & Vision
   FlyBrain brain;
@@ -68,19 +73,14 @@ class Fly {
   float proboscisExtend = 0;
   float respirationPulse = 0;
 
-  // Surface attachment normal (1 = Floor, -1 = Ceiling, 2/-2 = Walls)
-  int surfaceAttachment = 1; 
-
   Fly(float x, float y, float z) {
     pos = new PVector(x, y, z);
-    vel = new PVector(random(-1, 1), random(-1, 1), random(-0.5, 0.5));
+    vel = new PVector(random(-1.2, 1.2), random(-1.2, 1.2), random(-0.5, 0.5));
     acc = new PVector(0, 0, 0);
     heading = random(TWO_PI);
     
-    // Sex assignment: 50% Female, 50% Male
     isFemale = (random(1.0) > 0.5);
-    bodyScale = isFemale ? 1.05 : 0.92;
-    abdomenScale = isFemale ? 1.15 : 0.85;
+    bodyScale = isFemale ? 1.08 : 0.92;
 
     brain = new FlyBrain();
     vision = new FlyVision();
@@ -105,15 +105,12 @@ class Fly {
     respirationPulse += 0.08;
 
     // 1. THERMOREGULATION & METABOLISM
-    // Ambient temperature: warmer near the lamp (ceiling light)
     float distToLight = PVector.dist(pos, env.lightPos);
     float targetTemp = map(constrain(distToLight, 30, 450), 30, 450, 32.0, 20.0);
     bodyTemp = lerp(bodyTemp, targetTemp, 0.02);
-    // Wing beat frequency depends on thoracic temperature!
     wingFrequency = map(bodyTemp, 20.0, 32.0, 140.0, 220.0);
 
-    // Energy consumption:
-    // Flight burns trehalose at extreme rates!
+    // Energy consumption
     if (state == STATE_FLYING) {
       trehalose = max(0, trehalose - 0.00075);
       hydration = max(0, hydration - 0.00025);
@@ -121,16 +118,14 @@ class Fly {
       trehalose = max(0, trehalose - 0.00015);
       hydration = max(0, hydration - 0.00010);
     } else {
-      // Basal resting metabolism
       trehalose = max(0, trehalose - 0.00005);
     }
 
-    // Dust accumulates over time, impairing vision and tarsal adhesion
     cleanliness = max(0.1, cleanliness - 0.00018);
 
-    // Vitellogenesis: in females, protein is processed into mature egg clutches
+    // Vitellogenesis in females
     if (isFemale && protein > 0.35 && matureEggs < 6) {
-      vitellogenesis += 0.0012;
+      vitellogenesis += 0.0014;
       if (vitellogenesis >= 1.0) {
         matureEggs++;
         protein = max(0, protein - 0.25);
@@ -138,7 +133,7 @@ class Fly {
       }
     }
 
-    // 2. SENSORY INFLUX GATHERING
+    // 2. SENSORY INFLUX & LEARNING GRADIENT
     float carbOdor = 0;
     float proteinOdor = 0;
     Food closestFood = null;
@@ -155,13 +150,23 @@ class Fly {
       else proteinOdor += odorIntensity;
     }
 
-    // Tarsal sugar taste: when landed directly on sugar food
+    // Reinforcement Learning: Reward moving towards food!
+    if (closestFood != null && prevDistToFood < 9000) {
+      float deltaDist = prevDistToFood - minDist;
+      if (deltaDist > 0.4) {
+        // Positive dopamine reinforcement for effective heading
+        brain.applyDopamineReward(constrain(deltaDist * 0.06, 0, 0.4));
+      }
+    }
+    prevDistToFood = minDist;
+
+    // Tarsal sugar taste
     float tarsalSugar = 0;
-    if (closestFood != null && minDist < 24 && closestFood.type == FOOD_CARB && state != STATE_FLYING) {
+    if (closestFood != null && minDist < 20 && closestFood.type == FOOD_CARB && state != STATE_FLYING) {
       tarsalSugar = 1.0;
     }
 
-    // Sun / Light Compass bearing (Central Complex input)
+    // Sun / Light Compass bearing
     PVector diffLight = PVector.sub(env.lightPos, pos);
     float angleToLight = atan2(diffLight.y, diffLight.x) - heading;
     while (angleToLight > PI) angleToLight -= TWO_PI;
@@ -185,7 +190,6 @@ class Fly {
       }
     }
 
-    // Haltere Coriolis gyro metric: measures angular roll/yaw rate
     float haltereGyro = abs(vel.x * sin(heading) - vel.y * cos(heading)) * 0.1;
 
     // Update Compound Eye Vision
@@ -202,9 +206,9 @@ class Fly {
       tarsalSugar,
       haltereGyro,
       compassBearing,
-      1.0 - trehalose, // Trehalose hunger
-      isFemale ? (1.0 - protein) : (targetMate != null ? 0.8 : 0.1), // Protein urge / Mating drive
-      1.0 - hydration  // Thirst
+      1.0 - trehalose,
+      isFemale ? (1.0 - protein) : (targetMate != null ? 0.8 : 0.1),
+      1.0 - hydration
     );
 
     // 4. MOTOR ACTUATION & STATE MACHINE
@@ -216,200 +220,183 @@ class Fly {
     float feedCmd = brain.outputs[5];
     float ovipositWingCmd = brain.outputs[6];
 
-    // State Machine Decision Logic
     handleStateMachine(env, jumpCmd, feedCmd, ovipositWingCmd, closestFood, minDist);
 
     // 5. KINEMATIC INTEGRATION
     PVector wind = env.getWindAt(pos);
 
     if (state == STATE_FLYING) {
-      // Wings deployed & oscillating at biological frequency
-      wingFold = min(1.0, wingFold + 0.15);
+      wingFold = min(1.0, wingFold + 0.18);
       wingPhase += (wingFrequency / 60.0) * TWO_PI * 0.08;
       halterePhase += (wingFrequency / 60.0) * TWO_PI * 0.08;
 
-      // Exhaustion stall if trehalose is zero!
-      if (trehalose <= 0.01) {
-        wingThrustCmd *= 0.2; // Power failure!
-      }
+      if (trehalose <= 0.01) wingThrustCmd *= 0.2;
 
-      // Aerodynamic Steering
       heading += steerCmd * 0.11;
       pitch = lerp(pitch, pitchCmd * 0.45, 0.1);
       roll = lerp(roll, -steerCmd * 0.55, 0.12);
 
-      // Forward Thrust Vector
       PVector thrust = new PVector(cos(heading) * cos(pitch), sin(heading) * cos(pitch), sin(pitch));
       thrust.mult(wingThrustCmd * 2.4);
       acc.add(thrust);
 
-      // Physical Gravity & Dynamic Wind
       acc.add(env.gravity);
       acc.add(PVector.mult(wind, 0.12));
 
-      // Aerodynamic Damping
       vel.add(acc);
       vel.mult(0.93);
       pos.add(vel);
       acc.set(0, 0, 0);
 
-      // Tuck legs in aerodynamically
+      // Record flight trail point (fading trace)
+      flightTrail.add(pos.copy());
+      if (flightTrail.size() > MAX_TRAIL_LENGTH) {
+        flightTrail.remove(0);
+      }
+
       updateLegPositions(false);
 
-    } else if (state == STATE_TAKEOFF) {
-      // Mesothoracic Jump (TTM muscle catapult) + instant wing deploy!
-      wingFold = min(1.0, wingFold + 0.25);
-      wingPhase += 0.8;
-      pos.z += 4.0;
-      vel.z = 2.4;
-      stateTimer += 0.12;
-      if (stateTimer > 0.8 || pos.z > 16) {
-        state = STATE_FLYING;
-      }
+    } else {
+      // Clear flight trail smoothly when landed
+      if (flightTrail.size() > 0) flightTrail.remove(0);
 
-    } else if (state == STATE_LANDING) {
-      // Decelerate, swing legs out for tarsal contact, fold wings
-      vel.mult(0.65);
-      pos.z = max(0, pos.z - 2.2);
-      wingFold = max(0.0, wingFold - 0.1);
-      pitch = lerp(pitch, -0.2, 0.1);
+      if (state == STATE_TAKEOFF) {
+        wingFold = min(1.0, wingFold + 0.25);
+        wingPhase += 0.8;
+        pos.z += 4.0;
+        vel.z = 2.4;
+        stateTimer += 0.12;
+        if (stateTimer > 0.8 || pos.z > 16) state = STATE_FLYING;
 
-      if (pos.z <= 0.5) {
-        pos.z = 0;
-        vel.set(0, 0, 0);
-        state = STATE_CRAWLING;
-        wingFold = 0.0; // Folded flat over abdomen
-      }
-      updateLegPositions(true);
+      } else if (state == STATE_LANDING) {
+        vel.mult(0.65);
+        pos.z = max(0, pos.z - 2.2);
+        wingFold = max(0.0, wingFold - 0.1);
+        pitch = lerp(pitch, -0.2, 0.1);
 
-    } else if (state == STATE_CRAWLING) {
-      wingFold = max(0.0, wingFold - 0.12);
-      pos.z = 0;
-
-      // Hexapod Alternating Tripod Gait
-      float crawlSpeed = gaitCmd * 1.6;
-      heading += steerCmd * 0.06;
-      pos.x += cos(heading) * crawlSpeed;
-      pos.y += sin(heading) * crawlSpeed;
-      tripodPhase += crawlSpeed * 0.45;
-
-      updateLegPositions(true);
-
-    } else if (state == STATE_FEEDING) {
-      pos.z = 0;
-      wingFold = 0.0;
-      proboscisExtend = lerp(proboscisExtend, 1.0, 0.15);
-
-      // Ingest nutrients & reward dopamine
-      if (closestFood != null && minDist < 24) {
-        if (closestFood.type == FOOD_CARB) {
-          closestFood.consume(0.14);
-          trehalose = min(1.0, trehalose + 0.0035);
-          brain.applyDopamineReward(0.8);
-        } else {
-          closestFood.consume(0.12);
-          protein = min(1.0, protein + 0.003);
-          brain.applyDopamineReward(0.7);
+        if (pos.z <= 0.5) {
+          pos.z = 0;
+          vel.set(0, 0, 0);
+          state = STATE_CRAWLING;
+          wingFold = 0.0;
         }
-      }
-      updateLegPositions(true);
+        updateLegPositions(true);
 
-    } else if (state == STATE_GROOMING) {
-      pos.z = 0;
-      wingFold = 0.0;
-      groomPhase += 0.22;
-      cleanliness = min(1.0, cleanliness + 0.003); // Restores sensory cleanliness!
+      } else if (state == STATE_CRAWLING) {
+        wingFold = max(0.0, wingFold - 0.12);
+        pos.z = 0;
 
-      if (cleanliness >= 0.98) {
-        state = STATE_CRAWLING;
-      }
-      updateLegPositions(true);
+        float crawlSpeed = gaitCmd * 1.5;
+        heading += steerCmd * 0.06;
+        pos.x += cos(heading) * crawlSpeed;
+        pos.y += sin(heading) * crawlSpeed;
+        tripodPhase += crawlSpeed * 0.45;
 
-    } else if (state == STATE_COURTSHIP) {
-      pos.z = 0;
-      if (!isFemale) {
-        // Male: Unilateral wing extension & acoustic courtship song!
-        courtshipWingAngle = lerp(courtshipWingAngle, HALF_PI * 0.85, 0.1);
-        courtshipBuzzPhase += 0.5;
-        // Turn toward female
-        if (targetMate != null) {
-          PVector d = PVector.sub(targetMate.pos, pos);
-          heading = lerp(heading, atan2(d.y, d.x), 0.1);
-          if (PVector.dist(pos, targetMate.pos) < 18) {
-            // Copulation attempt!
-            targetMate.brain.applyDopamineReward(1.0);
-            this.brain.applyDopamineReward(1.0);
-            state = STATE_CRAWLING;
+        updateLegPositions(true);
+
+      } else if (state == STATE_FEEDING) {
+        pos.z = 0;
+        wingFold = 0.0;
+        proboscisExtend = lerp(proboscisExtend, 1.0, 0.15);
+
+        if (closestFood != null && minDist < 22) {
+          if (closestFood.type == FOOD_CARB) {
+            closestFood.consume(0.14);
+            trehalose = min(1.0, trehalose + 0.004);
+            brain.applyDopamineReward(1.2);
+            brain.foodFoundCount++;
+          } else {
+            closestFood.consume(0.12);
+            protein = min(1.0, protein + 0.0035);
+            brain.applyDopamineReward(1.0);
+            brain.foodFoundCount++;
           }
         }
-      } else {
-        // Female: if mature eggs ready and near protein food, extend ovipositor and lay eggs!
-        if (matureEggs > 0 && closestFood != null && minDist < 35 && closestFood.type == FOOD_PROTEIN) {
-          ovipositorExtension = lerp(ovipositorExtension, 1.0, 0.15);
-          if (ovipositorExtension > 0.85 && frameCount % 35 == 0) {
-            // Deposit egg clutch on protein substrate
-            env.eggs.add(new Egg(pos.x + random(-4, 4), pos.y + random(-4, 4), 0, this.brain));
-            matureEggs--;
-            brain.applyDopamineReward(1.0); // High biological satisfaction!
-            if (matureEggs <= 0) {
-              ovipositorExtension = 0;
+        updateLegPositions(true);
+
+      } else if (state == STATE_GROOMING) {
+        pos.z = 0;
+        wingFold = 0.0;
+        groomPhase += 0.22;
+        cleanliness = min(1.0, cleanliness + 0.0035);
+        if (cleanliness >= 0.98) state = STATE_CRAWLING;
+        updateLegPositions(true);
+
+      } else if (state == STATE_COURTSHIP) {
+        pos.z = 0;
+        if (!isFemale) {
+          courtshipWingAngle = lerp(courtshipWingAngle, HALF_PI * 0.85, 0.1);
+          courtshipBuzzPhase += 0.5;
+          if (targetMate != null) {
+            PVector d = PVector.sub(targetMate.pos, pos);
+            heading = lerp(heading, atan2(d.y, d.x), 0.1);
+            if (PVector.dist(pos, targetMate.pos) < 18) {
+              targetMate.brain.applyDopamineReward(1.2);
+              this.brain.applyDopamineReward(1.2);
               state = STATE_CRAWLING;
             }
           }
+        } else {
+          if (matureEggs > 0 && closestFood != null && minDist < 35 && closestFood.type == FOOD_PROTEIN) {
+            ovipositorExtension = lerp(ovipositorExtension, 1.0, 0.15);
+            if (ovipositorExtension > 0.85 && frameCount % 35 == 0) {
+              env.eggs.add(new Egg(pos.x + random(-4, 4), pos.y + random(-4, 4), 0, this.brain));
+              matureEggs--;
+              brain.applyDopamineReward(1.5);
+              if (matureEggs <= 0) {
+                ovipositorExtension = 0;
+                state = STATE_CRAWLING;
+              }
+            }
+          }
         }
+        updateLegPositions(true);
       }
-      updateLegPositions(true);
     }
 
-    // Hydration replenishment near water POI
+    // Hydration replenishment
     for (PointOfInterest poi : env.poiList) {
       if (poi.type == POI_WATER && PVector.dist(pos, poi.pos) < 25) {
         hydration = min(1.0, hydration + 0.004);
-        brain.applyDopamineReward(0.5);
+        brain.applyDopamineReward(0.4);
       }
     }
 
-    // Contain inside Terrarium Cube
     keepInCube(env);
   }
 
   void handleStateMachine(Environment env, float jumpCmd, float feedCmd, float ovipositWingCmd, Food closestFood, float minDist) {
-    // 1. Giant Fiber Escape Reflex overrides EVERYTHING!
     if (vision.loomingFactor > 0.35 && state != STATE_FLYING && state != STATE_TAKEOFF) {
       state = STATE_TAKEOFF;
       stateTimer = 0;
+      brain.applyDopamineReward(0.8); // Escape relief!
       return;
     }
 
-    // 2. Takeoff Trigger
     if (jumpCmd > 0.75 && (state == STATE_CRAWLING || state == STATE_GROOMING) && trehalose > 0.05) {
       state = STATE_TAKEOFF;
       stateTimer = 0;
       return;
     }
 
-    // 3. Landing Trigger
     if (state == STATE_FLYING && (trehalose < 0.15 || (closestFood != null && minDist < 45 && pos.z < 60))) {
       state = STATE_LANDING;
       return;
     }
 
-    // 4. Feeding Trigger on Ground
-    if (state == STATE_CRAWLING && closestFood != null && minDist < 24 && feedCmd > 0.5) {
+    if (state == STATE_CRAWLING && closestFood != null && minDist < 22 && feedCmd > 0.5) {
       state = STATE_FEEDING;
       return;
-    } else if (state == STATE_FEEDING && (minDist > 30 || feedCmd < 0.3)) {
+    } else if (state == STATE_FEEDING && (minDist > 28 || feedCmd < 0.3)) {
       state = STATE_CRAWLING;
     }
 
-    // 5. Grooming Trigger (when dirty)
     if (state == STATE_CRAWLING && cleanliness < 0.5 && random(1.0) < 0.03) {
       state = STATE_GROOMING;
       groomType = (random(1.0) > 0.5) ? 0 : 1;
       return;
     }
 
-    // 6. Courtship / Oviposition Trigger
     if (state == STATE_CRAWLING && ovipositWingCmd > 0.6) {
       if (!isFemale && targetMate != null && minMateDist(targetMate) < 45) {
         state = STATE_COURTSHIP;
@@ -423,20 +410,16 @@ class Fly {
     return (m == null) ? 999 : PVector.dist(pos, m.pos);
   }
 
-  // Bounding & Glass Wall / Ceiling Contact
   void keepInCube(Environment env) {
-    float margin = 8;
-    // Floor
+    float margin = 6;
     if (pos.z < 0) {
       pos.z = 0;
       if (state == STATE_FLYING) state = STATE_LANDING;
     }
-    // Ceiling
     if (pos.z > env.cubeH - margin) {
       pos.z = env.cubeH - margin;
       vel.z = -abs(vel.z) * 0.5;
     }
-    // X Glass Walls
     if (pos.x < -env.cubeW/2 + margin) {
       pos.x = -env.cubeW/2 + margin;
       vel.x = abs(vel.x) * 0.5;
@@ -447,7 +430,6 @@ class Fly {
       vel.x = -abs(vel.x) * 0.5;
       heading = PI - heading;
     }
-    // Y Glass Walls
     if (pos.y < -env.cubeD/2 + margin) {
       pos.y = -env.cubeD/2 + margin;
       vel.y = abs(vel.y) * 0.5;
@@ -460,31 +442,24 @@ class Fly {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // 6 Legs Kinematics (Alternating Tripod Gait & Grooming)
-  // ---------------------------------------------------------------------------
   void updateLegPositions(boolean onGround) {
-    float[] sideOffsets = {-1, 1, -1, 1, -1, 1}; // L, R, L, R, L, R
-    float[] longitudinalOffsets = {3.5, 3.5, 0.0, 0.0, -3.5, -3.5}; // Pro, Meso, Meta thorax
+    float[] sideOffsets = {-1, 1, -1, 1, -1, 1};
+    float[] longitudinalOffsets = {3.5, 3.5, 0.0, 0.0, -3.5, -3.5};
 
     for (int i = 0; i < 6; i++) {
       float side = sideOffsets[i];
       float longOff = longitudinalOffsets[i];
 
-      // Base joint on thorax
       legBases[i].x = pos.x + cos(heading) * longOff - sin(heading) * (side * 3.2);
       legBases[i].y = pos.y + sin(heading) * longOff + cos(heading) * (side * 3.2);
       legBases[i].z = pos.z + 2.0;
 
       if (!onGround) {
-        // Tucked aerodynamically against body during flight
         legTips[i].x = legBases[i].x + cos(heading) * (longOff * 0.5) - sin(heading) * (side * 2.5);
         legTips[i].y = legBases[i].y + sin(heading) * (longOff * 0.5) + cos(heading) * (side * 2.5);
         legTips[i].z = legBases[i].z - 1.2;
       } else if (state == STATE_GROOMING) {
-        // Grooming routines
         if (groomType == 0) {
-          // Front legs (0 & 1) sweep over head & compound eyes
           if (i == 0 || i == 1) {
             float sweep = sin(groomPhase) * 4.0;
             legTips[i].x = pos.x + cos(heading) * (6.5 + sweep) - sin(heading) * (side * 2.0);
@@ -494,7 +469,6 @@ class Fly {
             defaultLegRest(i, side, longOff);
           }
         } else {
-          // Hind legs (4 & 5) rub together and sweep folded wings
           if (i == 4 || i == 5) {
             float rub = sin(groomPhase) * 3.0;
             legTips[i].x = pos.x - cos(heading) * (6.0 + rub) - sin(heading) * (side * 1.5);
@@ -505,13 +479,9 @@ class Fly {
           }
         }
       } else {
-        // Alternating Tripod Walking Gait
-        // Tripod 1: L1, R2, L3 (indices 0, 3, 4)
-        // Tripod 2: R1, L2, R3 (indices 1, 2, 5)
         boolean isTripod1 = (i == 0 || i == 3 || i == 4);
         float phase = isTripod1 ? tripodPhase : (tripodPhase + PI);
         float swing = sin(phase);
-
         float legReach = (i < 2) ? 6.5 : (i < 4 ? 6.0 : 7.2);
         float stepForward = cos(phase) * 3.0;
         float lift = max(0, swing * 2.5);
@@ -531,198 +501,362 @@ class Fly {
   }
 
   // ---------------------------------------------------------------------------
-  // 3D Isometric Diptera Rendering
+  // 3D Isometric World Rendering: Realistic Tiny Fly Avatar + Flight Trace
   // ---------------------------------------------------------------------------
-  void display(IsoCamera cam, boolean isSelected) {
-    PVector sPos = cam.toScreen(pos.x, pos.y, pos.z);
-    pushMatrix();
+  void displayInWorld(IsoCamera cam, boolean isSelected) {
     pushStyle();
 
-    // 1. Drop shadow on ground floor
-    if (pos.z > 2) {
-      PVector sShadow = cam.toScreen(pos.x, pos.y, 0);
-      float shadowScale = map(pos.z, 0, 300, 1.0, 0.4);
-      noStroke();
-      fill(0, map(pos.z, 0, 300, 75, 15));
-      ellipse(sShadow.x, sShadow.y, 14 * bodyScale * shadowScale, 9 * bodyScale * shadowScale);
+    // 1. Flight Trace Ribbon (Graceful, not too long)
+    if (flightTrail.size() > 1) {
+      noFill();
+      for (int i = 0; i < flightTrail.size() - 1; i++) {
+        PVector p1 = flightTrail.get(i);
+        PVector p2 = flightTrail.get(i + 1);
+        PVector s1 = cam.toScreen(p1.x, p1.y, p1.z);
+        PVector s2 = cam.toScreen(p2.x, p2.y, p2.z);
+        
+        float progress = map(i, 0, flightTrail.size() - 1, 0, 1);
+        float alpha = progress * 160;
+        strokeWeight(lerp(0.5, 1.8, progress));
+        stroke(isFemale ? color(200, 160, 255, alpha) : color(120, 210, 255, alpha));
+        line(s1.x, s1.y, s2.x, s2.y);
+      }
     }
 
-    // 2. Selection Ring & Telemetry Tag
+    PVector sPos = cam.toScreen(pos.x, pos.y, pos.z);
+
+    // 2. Drop shadow on ground (Tiny realistic shadow speck)
+    if (pos.z > 1) {
+      PVector sShadow = cam.toScreen(pos.x, pos.y, 0);
+      float shadowAlpha = map(pos.z, 0, 300, 90, 15);
+      noStroke();
+      fill(0, shadowAlpha);
+      ellipse(sShadow.x, sShadow.y, 6.0, 3.5);
+    }
+
+    // 3. Selection Indicator Ring
     if (isSelected) {
-      stroke(100, 220, 255, 200);
-      strokeWeight(1.5);
+      stroke(100, 220, 255, 180);
+      strokeWeight(1.2);
       noFill();
-      ellipse(sPos.x, sPos.y, 36 * bodyScale, 22 * bodyScale);
+      ellipse(sPos.x, sPos.y, 18, 12);
       
-      // Floating identification tag
+      // Specimen ID
       fill(100, 220, 255);
       textAlign(CENTER, BOTTOM);
-      textSize(9);
-      String sexIcon = isFemale ? "♀ (Female)" : "♂ (Male)";
-      text(sexIcon + " | " + brain.currentThought, sPos.x, sPos.y - 20);
+      textSize(8);
+      text((isFemale ? "♀" : "♂"), sPos.x, sPos.y - 8);
     }
 
-    // 3. Render 6 Legs
-    stroke(30, 28, 25);
-    strokeWeight(1.2);
+    // 4. Tiny Fly Avatar: Just a few pixels wide!
+    pushMatrix();
+    translate(sPos.x, sPos.y);
+
+    if (state == STATE_FLYING || state == STATE_TAKEOFF) {
+      // Flying Avatar: Tiny body speck + rapid wing motion blur
+      // Wing motion blur
+      noStroke();
+      fill(220, 240, 255, 130);
+      ellipse(-2.5, -1, 5, 2.5);
+      ellipse(2.5, -1, 5, 2.5);
+
+      // Body speck (dark brownish black ~4 pixels)
+      fill(35, 30, 28);
+      ellipse(0, 0, 4.5, 3.5);
+
+      // Reddish ommatidia eye specks
+      fill(190, 30, 20);
+      ellipse(-1.2, -1.2, 1.5, 1.5);
+      ellipse(1.2, -1.2, 1.5, 1.5);
+
+    } else {
+      // Landed / Crawling Avatar: Tiny folded wings over body + minute legs
+      // Legs (minute black ticks)
+      stroke(30, 28, 25);
+      strokeWeight(0.8);
+      line(-2.5, -2, 2.5, -2);
+      line(-3, 0, 3, 0);
+      line(-2.5, 2, 2.5, 2);
+
+      // Body & folded wings
+      noStroke();
+      fill(38, 34, 30);
+      ellipse(0, 0, 4.5, 3.2);
+
+      // Folded wing translucency
+      fill(210, 230, 250, 150);
+      ellipse(0, 0.5, 3.2, 4.5);
+
+      // Eye dots
+      fill(190, 30, 20);
+      ellipse(-1.0, -1.4, 1.4, 1.4);
+      ellipse(1.0, -1.4, 1.4, 1.4);
+    }
+
+    popMatrix();
+    popStyle();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Dedicated Bottom Inspector: High-Detail Anatomical & Biomechanical Fly Diagram
+  // ---------------------------------------------------------------------------
+  void displayBottomDiagram(float cx, float cy, float scale) {
+    pushMatrix();
+    pushStyle();
+    translate(cx, cy);
+    scale(scale);
+
+    // 1. Outer Hexapod Leg System (Animated Alternating Tripod Gait or Grooming)
+    stroke(45, 40, 35);
+    strokeWeight(2.2);
+
     for (int i = 0; i < 6; i++) {
-      PVector sBase = cam.toScreen(legBases[i].x, legBases[i].y, legBases[i].z);
-      PVector sTip = cam.toScreen(legTips[i].x, legTips[i].y, legTips[i].z);
-      // Knee joint (femur-tibia flexion)
-      float kneeZ = (legBases[i].z + legTips[i].z) * 0.5 + 2.5;
-      PVector sKnee = cam.toScreen((legBases[i].x + legTips[i].x)*0.5, (legBases[i].y + legTips[i].y)*0.5, kneeZ);
-      line(sBase.x, sBase.y, sKnee.x, sKnee.y);
-      line(sKnee.x, sKnee.y, sTip.x, sTip.y);
+      float side = (i % 2 == 0) ? -1 : 1;
+      float longY = (i < 2) ? -42 : (i < 4 ? -16 : 14);
+
+      // Base joint
+      float bx = side * 24;
+      float by = longY;
+
+      // Animated leg kinematics
+      boolean isTripod1 = (i == 0 || i == 3 || i == 4);
+      float phase = isTripod1 ? tripodPhase : (tripodPhase + PI);
+      float swing = (state == STATE_CRAWLING) ? sin(phase) * 14 : 0;
+      float stepForward = (state == STATE_CRAWLING) ? cos(phase) * 12 : 0;
+
+      // Grooming leg action in diagram
+      if (state == STATE_GROOMING) {
+        if (groomType == 0 && (i == 0 || i == 1)) {
+          stepForward = -20 + sin(groomPhase) * 14;
+          bx += side * sin(groomPhase) * 6;
+        } else if (groomType == 1 && (i == 4 || i == 5)) {
+          stepForward = 20 + sin(groomPhase) * 12;
+          bx -= side * 10;
+        }
+      }
+
+      // Knee (Femur-Tibia joint)
+      float kx = side * (52 + abs(swing) * 0.4);
+      float ky = longY + stepForward * 0.5;
+
+      // Tarsal tip (Foot contact with pulvilli)
+      float tx = side * (75 + (i == 2 || i == 3 ? 12 : 4));
+      float ty = longY + (i < 2 ? -24 : (i > 3 ? 34 : 0)) + stepForward;
+
+      // Coxa-femur line
+      line(bx, by, kx, ky);
+      // Tibia-tarsus line
+      line(kx, ky, tx, ty);
+
+      // Adhesive pulvilli foot pad dot
+      fill(80, 70, 60);
+      noStroke();
+      ellipse(tx, ty, 4.5, 4.5);
+      stroke(45, 40, 35);
+      strokeWeight(2.2);
     }
 
-    // 4. Render Dipteran Body (Abdomen, Thorax, Head)
-    // Abdomen (posterior)
-    float abdAngle = heading + PI;
-    float abdX = pos.x + cos(abdAngle) * (6.0 * bodyScale);
-    float abdY = pos.y + sin(abdAngle) * (6.0 * bodyScale);
-    PVector sAbd = cam.toScreen(abdX, abdY, pos.z + 1.8);
+    // 2. Anatomical Cutaway Body Shell
+    noStroke();
+    // Head Capsule
+    fill(38, 34, 30, 220);
+    ellipse(0, -78, 54, 42);
 
-    // Abdomen color: dark bronze with segmental bands
-    fill(42, 38, 32);
-    stroke(25, 22, 18);
-    strokeWeight(1);
-    ellipse(sAbd.x, sAbd.y, 11 * bodyScale, 8.5 * abdomenScale * bodyScale);
-    // Abdominal stripes (Dipteran vittae)
-    stroke(70, 65, 55, 160);
-    line(sAbd.x - 3, sAbd.y - 3, sAbd.x - 3, sAbd.y + 3);
-    line(sAbd.x + 1, sAbd.y - 3, sAbd.x + 1, sAbd.y + 3);
+    // Thorax (Powerhouse with flight muscles DLM/DVM)
+    fill(48, 44, 38, 230);
+    ellipse(0, -18, 64, 76);
 
-    // Telescopic Ovipositor (Females laying eggs)
-    if (isFemale && ovipositorExtension > 0.05) {
-      float oviX = pos.x + cos(abdAngle) * (12.0 * bodyScale);
-      float oviY = pos.y + sin(abdAngle) * (12.0 * bodyScale);
-      PVector sOvi = cam.toScreen(oviX, oviY, pos.z + 0.5);
-      stroke(220, 200, 160);
-      strokeWeight(1.5);
-      line(sAbd.x, sAbd.y, sOvi.x, sOvi.y);
+    // Abdomen with bronze segments
+    fill(42, 38, 32, 230);
+    ellipse(0, 70, 56, 95);
+    // Transverse segmental lines
+    stroke(75, 70, 58, 180);
+    strokeWeight(1.5);
+    line(-24, 45, 24, 45);
+    line(-26, 68, 26, 68);
+    line(-23, 90, 23, 90);
+    line(-16, 110, 16, 110);
+
+    // Telescopic Ovipositor (Females)
+    if (isFemale && ovipositorExtension > 0.1) {
+      stroke(240, 225, 180);
+      strokeWeight(3.0);
+      line(0, 115, 0, 115 + ovipositorExtension * 32);
+      fill(255, 240, 200);
+      ellipse(0, 115 + ovipositorExtension * 32, 5, 5);
     }
 
-    // Thorax (central motor powerhouse with flight muscles)
-    fill(48, 44, 40);
-    stroke(28, 25, 20);
-    ellipse(sPos.x, sPos.y, 9.5 * bodyScale, 8.0 * bodyScale);
+    // 3. Wings (Folded flat vs vibrating vs flapping)
+    renderDiagramWings();
 
-    // Halteres (Tiny oscillating gyroscopic clubs behind wings)
-    if (state == STATE_FLYING) {
-      float haltOsc = sin(halterePhase) * 3.0;
-      PVector sHaltL = cam.toScreen(pos.x - sin(heading)*3.5, pos.y + cos(heading)*3.5, pos.z + 2.0 + haltOsc);
-      PVector sHaltR = cam.toScreen(pos.x + sin(heading)*3.5, pos.y - cos(heading)*3.5, pos.z + 2.0 - haltOsc);
-      stroke(255, 210, 80, 200);
-      strokeWeight(1.0);
-      line(sPos.x, sPos.y, sHaltL.x, sHaltL.y);
-      line(sPos.x, sPos.y, sHaltR.x, sHaltR.y);
-    }
+    // 4. Halteres (Oscillating Gyroscopic Clubs)
+    float haltOsc = (state == STATE_FLYING) ? sin(halterePhase) * 6.0 : 0;
+    stroke(255, 200, 70);
+    strokeWeight(2.0);
+    line(-28, -2, -50, -2 + haltOsc);
+    line(28, -2, 50, -2 - haltOsc);
+    fill(255, 215, 80);
+    ellipse(-50, -2 + haltOsc, 7, 7);
+    ellipse(50, -2 - haltOsc, 7, 7);
 
-    // Wings (Dipteran Kinematics)
-    renderWings(cam, sPos);
-
-    // Head (anterior)
-    float headX = pos.x + cos(heading) * (5.5 * bodyScale);
-    float headY = pos.y + sin(heading) * (5.5 * bodyScale);
-    PVector sHead = cam.toScreen(headX, headY, pos.z + 2.2);
-
-    fill(35, 32, 28);
-    ellipse(sHead.x, sHead.y, 6.5 * bodyScale, 5.5 * bodyScale);
-
-    // Large Compound Eyes (Dorsolateral)
-    // Males have narrower frons (holoptic eyes closer together)
-    float eyeSeparation = isFemale ? 2.4 : 1.4;
-    PVector sEyeL = cam.toScreen(headX - sin(heading) * eyeSeparation, headY + cos(heading) * eyeSeparation, pos.z + 2.6);
-    PVector sEyeR = cam.toScreen(headX + sin(heading) * eyeSeparation, headY - cos(heading) * eyeSeparation, pos.z + 2.6);
-
-    // Eyes glow deep reddish brown
-    fill(190, 35, 25);
+    // 5. Internal Nervous System & Action Potentials Overlay
+    // Compound Eyes (Left & Right)
+    fill(200, 32, 22);
     stroke(140, 20, 15);
-    strokeWeight(0.8);
-    ellipse(sEyeL.x, sEyeL.y, 4.0 * bodyScale, 4.2 * bodyScale);
-    ellipse(sEyeR.x, sEyeR.y, 4.0 * bodyScale, 4.2 * bodyScale);
+    strokeWeight(1.2);
+    float eyeSep = isFemale ? 18 : 13;
+    ellipse(-eyeSep, -80, 18, 32);
+    ellipse(eyeSep, -80, 18, 32);
 
-    // Proboscis extension when feeding
-    if (proboscisExtend > 0.1) {
-      float probX = headX + cos(heading) * (4.5 * proboscisExtend);
-      float probY = headY + sin(heading) * (4.5 * proboscisExtend);
-      PVector sProb = cam.toScreen(probX, probY, pos.z);
-      stroke(80, 70, 55);
-      strokeWeight(1.5);
-      line(sHead.x, sHead.y, sProb.x, sProb.y);
+    // 3 Dorsal Ocelli
+    fill(255, 245, 120);
+    noStroke();
+    ellipse(0, -92, 4, 4);
+    ellipse(-5, -88, 3.5, 3.5);
+    ellipse(5, -88, 3.5, 3.5);
+
+    // Antennae (Johnston's organ & arista)
+    stroke(190, 210, 235);
+    strokeWeight(1.6);
+    line(-8, -96, -18, -114);
+    line(8, -96, 18, -114);
+    line(-18, -114, -26, -120);
+    line(18, -114, 26, -120);
+
+    // Optic Lobes
+    noFill();
+    stroke(80, 210, 255, 190);
+    strokeWeight(1.5);
+    ellipse(-11, -78, 10, 20);
+    ellipse(11, -78, 10, 20);
+
+    // Central Complex (CX Compass)
+    fill(255, 215, 80, 210);
+    stroke(255, 235, 110);
+    strokeWeight(1.2);
+    ellipse(0, -74, 14, 10);
+
+    // Mushroom Bodies (MB Olfactory Learning)
+    fill(225, 85, 175, 210);
+    noStroke();
+    ellipse(-8, -68, 7, 7);
+    ellipse(8, -68, 7, 7);
+
+    // Ventral Nerve Cord descent
+    stroke(110, 225, 255);
+    strokeWeight(2.5);
+    line(0, -58, 0, -32);
+
+    // Thoracic-Abdominal Ganglion (TAG)
+    fill(60, 190, 240, 220);
+    stroke(110, 230, 255);
+    strokeWeight(1.5);
+    ellipse(0, -18, 24, 38);
+
+    // Radiating Motor Nerves
+    stroke(80, 200, 255, 170);
+    strokeWeight(1.2);
+    line(0, -26, -34, -42);
+    line(0, -26, 34, -42);
+    line(0, -18, -40, -16);
+    line(0, -18, 40, -16);
+    line(0, -10, -34, 14);
+    line(0, -10, 34, 14);
+
+    // Abdominal Nerve Cord
+    line(0, 0, 0, 85);
+
+    // Glowing Action Potentials traveling down nerves
+    for (ActionPotential ap : brain.spikes) {
+      PVector sp = brain.getSpikePosition(ap.tract, ap.progress);
+      noStroke();
+      fill(ap.col);
+      ellipse(sp.x * 1.3, sp.y * 1.3, 6, 6);
+      fill(255, 220);
+      ellipse(sp.x * 1.3, sp.y * 1.3, 3, 3);
     }
+
+    // Proboscis extension
+    if (proboscisExtend > 0.1) {
+      stroke(90, 75, 60);
+      strokeWeight(3.0);
+      line(0, -96, 0, -96 - proboscisExtend * 18);
+    }
+
+    // Labels
+    fill(150, 195, 240);
+    textAlign(CENTER, TOP);
+    textSize(8.5);
+    text("COMPOUND EYES & OCELLI", 0, -135);
+    text("CENTRAL COMPLEX (COMPASS)", 0, -62);
+    text("THORACIC GANGLION & CPG", 0, 5);
+    text("HALTERES", -62, -18);
+    text(isFemale ? "OVIPOSITOR" : "GENITALIA", 0, 122);
 
     popStyle();
     popMatrix();
   }
 
-  // Render authentic Dipteran wings (folded flat vs high-speed aerodynamic blur)
-  void renderWings(IsoCamera cam, PVector sPos) {
+  void renderDiagramWings() {
     if (state == STATE_FLYING || state == STATE_TAKEOFF) {
-      // High-speed wing motion blur & venation
-      float flapAngle = sin(wingPhase) * 0.85;
-      
-      // Semi-translucent aerodynamic wing blades
-      fill(220, 240, 255, 65);
-      stroke(180, 210, 240, 120);
-      strokeWeight(0.8);
+      // High-speed wing flapping blur
+      float flap = sin(wingPhase) * 18;
+      fill(220, 240, 255, 75);
+      stroke(180, 215, 245, 140);
+      strokeWeight(1.2);
 
-      // Left Wing
       pushMatrix();
-      translate(sPos.x, sPos.y - 1);
-      rotate(heading - HALF_PI + flapAngle * 0.4);
-      ellipse(0, -14 * bodyScale, 7 * bodyScale, 24 * bodyScale);
-      // Costa venation line
-      line(0, 0, 0, -22 * bodyScale);
+      translate(-14, -24);
+      rotate(-HALF_PI + radians(flap));
+      ellipse(0, -42, 22, 75);
+      line(0, 0, 0, -70);
       popMatrix();
 
-      // Right Wing
       pushMatrix();
-      translate(sPos.x, sPos.y - 1);
-      rotate(heading + HALF_PI - flapAngle * 0.4);
-      ellipse(0, -14 * bodyScale, 7 * bodyScale, 24 * bodyScale);
-      line(0, 0, 0, -22 * bodyScale);
+      translate(14, -24);
+      rotate(HALF_PI - radians(flap));
+      ellipse(0, -42, 22, 75);
+      line(0, 0, 0, -70);
       popMatrix();
 
     } else if (state == STATE_COURTSHIP && !isFemale) {
-      // Male Courtship Song: One wing extended at 90 deg and vibrating rapidly!
+      // Male Courtship Song: One wing unfurled at 90 deg and vibrating
       fill(220, 240, 255, 140);
-      stroke(180, 210, 240, 180);
-      strokeWeight(0.8);
+      stroke(180, 215, 245, 180);
+      strokeWeight(1.2);
 
-      // Vibrating left wing
       pushMatrix();
-      translate(sPos.x, sPos.y);
-      rotate(heading - courtshipWingAngle + sin(courtshipBuzzPhase) * 0.15);
-      ellipse(0, -12 * bodyScale, 6 * bodyScale, 20 * bodyScale);
-      line(0, 0, 0, -18 * bodyScale);
+      translate(-14, -24);
+      rotate(-HALF_PI * 0.9 + sin(courtshipBuzzPhase) * 0.15);
+      ellipse(0, -38, 20, 68);
+      line(0, 0, 0, -62);
       popMatrix();
 
-      // Folded right wing
       pushMatrix();
-      translate(sPos.x, sPos.y);
-      rotate(heading + PI);
-      ellipse(0, -9 * bodyScale, 5 * bodyScale, 17 * bodyScale);
+      translate(14, -24);
+      rotate(PI + 0.1);
+      ellipse(0, -32, 18, 62);
+      line(0, 0, 0, -56);
       popMatrix();
 
     } else {
-      // Resting / Landed: Wings folded flat over abdomen in classic housefly posture
-      fill(210, 230, 250, 130);
-      stroke(160, 190, 220, 160);
-      strokeWeight(0.8);
+      // Folded flat over abdomen in classic Diptera posture
+      fill(215, 235, 255, 135);
+      stroke(170, 205, 235, 160);
+      strokeWeight(1.2);
 
       pushMatrix();
-      translate(sPos.x, sPos.y);
-      rotate(heading + PI - 0.12);
-      ellipse(0, -9 * bodyScale, 5.2 * bodyScale, 18 * bodyScale);
-      line(0, 0, 0, -16 * bodyScale);
+      translate(-8, -24);
+      rotate(PI - 0.12);
+      ellipse(0, -34, 19, 68);
+      line(0, 0, 0, -62);
       popMatrix();
 
       pushMatrix();
-      translate(sPos.x, sPos.y);
-      rotate(heading + PI + 0.12);
-      ellipse(0, -9 * bodyScale, 5.2 * bodyScale, 18 * bodyScale);
-      line(0, 0, 0, -16 * bodyScale);
+      translate(8, -24);
+      rotate(PI + 0.12);
+      ellipse(0, -34, 19, 68);
+      line(0, 0, 0, -62);
       popMatrix();
     }
   }

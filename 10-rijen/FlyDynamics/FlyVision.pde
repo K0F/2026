@@ -101,7 +101,6 @@ class FlyVision {
     motionIntensity = lerp(motionIntensity, diffSum / (gridW * gridH), 0.25);
     horizontalSlip = lerp(horizontalSlip, (rightDiff - leftDiff) / (gridW * gridH), 0.2);
     
-    // Looming: rapid high-contrast dark/bright disc expanding symmetrically
     float loomRaw = (centerDiff * 1.8 + borderDiff * 2.2) * 2.5;
     loomingFactor = lerp(loomingFactor, constrain(loomRaw, 0, 1.0), 0.35);
   }
@@ -111,15 +110,12 @@ class FlyVision {
     float dist = diff.mag();
     if (dist < 1.0) return;
 
-    // Angle in horizontal plane relative to fly heading
     float targetYaw = atan2(diff.y, diff.x) - heading;
     while (targetYaw > PI) targetYaw -= TWO_PI;
     while (targetYaw < -PI) targetYaw += TWO_PI;
 
-    // Angle in vertical plane relative to fly pitch
     float targetPitch = atan2(diff.z, sqrt(diff.x * diff.x + diff.y * diff.y)) - pitch;
 
-    // Check if within compound eye field of view
     if (abs(targetYaw) < fovH/2 && abs(targetPitch) < fovV/2) {
       float px = map(targetYaw, -fovH/2, fovH/2, 0, gridW);
       float py = map(targetPitch, fovV/2, -fovV/2, 0, gridH);
@@ -157,62 +153,58 @@ class FlyVision {
   }
 
   // ---------------------------------------------------------------------------
-  // Low-Res Pixel Compound Eye HUD Viewport
+  // Low-Res Pixel Compound Eye HUD Viewport (Pixel Art Aesthetic)
   // ---------------------------------------------------------------------------
   void displayHUD(float px, float py, float pw, float ph) {
     pushStyle();
-    fill(10, 16, 26, 235);
-    stroke(70, 130, 200, 160);
-    strokeWeight(1.5);
-    rect(px, py, pw, ph, 8);
+    fill(10, 16, 26);
+    stroke(55, 95, 140);
+    strokeWeight(1);
+    rect(px, py, pw, ph);
 
     // Title
     fill(180, 225, 255);
     textAlign(LEFT, TOP);
-    textSize(10);
-    text("LOW-RES COMPOUND EYE (28x12 OMMATIDIA)", px + 10, py + 7);
+    text("COMPOUND EYE (28x12 PIXELS)", px + 8, py + 8);
     
     // Looming threat indicator
     if (loomingFactor > 0.28) {
-      fill(255, 60, 60, 210 + 45 * sin(frameCount * 0.35));
+      fill(255, 50, 50);
       textAlign(RIGHT, TOP);
-      textSize(9);
-      text("! LOOMING THREAT: " + nf(loomingFactor * 100, 0, 0) + "% !", px + pw - 10, py + 7);
+      text("! LOOM THREAT: " + nf(loomingFactor * 100, 0, 0) + "% !", px + pw - 8, py + 8);
     }
 
     // Draw the low-res pixel grid
-    float gridStartX = px + 10;
+    float gridStartX = px + 8;
     float gridStartY = py + 24;
-    float cellW = (pw - 24) / gridW;
+    float cellW = (pw - 20) / gridW;
     float cellH = (ph - 38) / gridH;
 
     for (int x = 0; x < gridW; x++) {
       for (int y = 0; y < gridH; y++) {
         color c = colorBuffer[x][y];
         fill(c);
-        stroke(22, 32, 44);
-        strokeWeight(0.5);
+        stroke(18, 28, 40);
+        strokeWeight(1);
         
-        // Mid-eye septum separation gap
         float renderX = gridStartX + x * cellW;
-        if (x >= gridW/2) renderX += 4;
+        if (x >= gridW/2) renderX += 4; // Mid-eye septum separation gap
         
-        rect(renderX, gridStartY + y * cellH, cellW - 0.5, cellH - 0.5, 1.5);
+        rect(renderX, gridStartY + y * cellH, cellW - 1, cellH - 1);
       }
     }
 
     // Optical Flow vector arrow (motion slip)
     if (abs(horizontalSlip) > 0.05) {
-      stroke(255, 220, 80);
-      strokeWeight(1.5);
+      stroke(255, 205, 50);
+      strokeWeight(1);
       float flowCenterX = px + pw/2;
       float flowY = py + ph - 8;
-      line(flowCenterX, flowY, flowCenterX + horizontalSlip * 120, flowY);
+      line(flowCenterX, flowY, flowCenterX + horizontalSlip * 110, flowY);
     }
 
     // Eye labels
     fill(130, 170, 215);
-    textSize(8);
     textAlign(CENTER, BOTTOM);
     text("LEFT EYE", gridStartX + (gridW/4) * cellW, py + ph - 2);
     text("RIGHT EYE", gridStartX + 4 + (3 * gridW/4) * cellW, py + ph - 2);
