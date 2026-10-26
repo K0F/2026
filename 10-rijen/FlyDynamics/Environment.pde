@@ -62,8 +62,8 @@ class Environment {
     larvae = new ArrayList<Larva>();
     airParticles = new ArrayList<AirDriftParticle>();
 
-    // Initial atmospheric air drift motes
-    for (int i = 0; i < 90; i++) {
+    // Initial atmospheric air drift motes (turbulent flow field visualizers)
+    for (int i = 0; i < 140; i++) {
       airParticles.add(new AirDriftParticle(
         random(-cubeW * 0.45, cubeW * 0.45),
         random(-cubeD * 0.45, cubeD * 0.45),
@@ -92,38 +92,53 @@ class Environment {
     lightPulse += 0.04;
     lightIntensity = 0.95 + 0.05 * sin(lightPulse);
 
-    // 2. Dynamic Wind Calculation via 3D Perlin Noise
-    windTime += 0.008;
-    float windAngle = noise(windTime) * TWO_PI * 2.0;
-    float windStrength = noise(windTime + 50) * 0.8;
-    baseWind.set(cos(windAngle) * windStrength, sin(windAngle) * windStrength, sin(windTime * 2.0) * 0.15);
+    // 2. Dynamic Wind Calculation via Multi-Frequency 3D Perlin Noise
+    windTime += 0.009;
     
     // Wind gust decay
-    windGust.mult(0.96);
+    windGust.mult(0.95);
 
-    // Update air drift particles
+    // Update air drift particles in turbulent flow field
     for (AirDriftParticle p : airParticles) {
       PVector totalWind = getWindAt(p.pos);
       p.update(totalWind, cubeW, cubeD, cubeH);
     }
 
     // 3. Update Foods & Scent Emission
+    float totalFoodAmount = 0;
+    boolean hasCarb = false;
+    boolean hasProtein = false;
+
     for (int i = foods.size() - 1; i >= 0; i--) {
       Food f = foods.get(i);
       f.update();
       if (f.amount <= 0) {
         foods.remove(i);
-      } else if (frameCount % 5 == 0 && scentTrail.size() < 240) {
-        // Emit olfactory plume particles carrying the odor
-        color sCol = (f.type == FOOD_CARB) ? color(255, 220, 80) : color(220, 90, 160);
-        scentTrail.add(new ScentParticle(
-          f.pos.x + random(-8, 8),
-          f.pos.y + random(-8, 8),
-          f.pos.z + random(2, 8),
-          sCol,
-          f.type
-        ));
+      } else {
+        totalFoodAmount += f.amount;
+        if (f.type == FOOD_CARB) hasCarb = true;
+        if (f.type == FOOD_PROTEIN) hasProtein = true;
+
+        if (frameCount % 6 == 0 && scentTrail.size() < 240) {
+          // Emit olfactory plume particles carrying the odor
+          color sCol = (f.type == FOOD_CARB) ? color(255, 220, 80) : color(220, 90, 160);
+          scentTrail.add(new ScentParticle(
+            f.pos.x + random(-8, 8),
+            f.pos.y + random(-8, 8),
+            f.pos.z + random(2, 8),
+            sCol,
+            f.type
+          ));
+        }
       }
+    }
+
+    // Sustainable Autonomous Food Replenishment: keeps multi-generational colony flourishing
+    if ((!hasCarb || totalFoodAmount < 80) && frameCount % 450 == 0) {
+      spawnFood(new PVector(random(-cubeW * 0.35, cubeW * 0.35), random(-cubeD * 0.35, cubeD * 0.35), 0), FOOD_CARB, "Sucrose Droplet", 180);
+    }
+    if ((!hasProtein || totalFoodAmount < 110) && (frameCount + 225) % 450 == 0) {
+      spawnFood(new PVector(random(-cubeW * 0.35, cubeW * 0.35), random(-cubeD * 0.35, cubeD * 0.35), 0), FOOD_PROTEIN, "Fermenting Yeast", 220);
     }
 
     // Update scent particles with wind advection
@@ -163,18 +178,59 @@ class Environment {
     threatVisualRadius = lerp(threatVisualRadius, threatActive ? threatRadius : 0, 0.2);
   }
 
-  // Get total 3D wind vector at any coordinate (ambient wind + thermal updraft near lamp)
+  // Get total 3D wind vector at any coordinate (spatially varying turbulent flow field)
   PVector getWindAt(PVector p) {
-    PVector w = baseWind.copy();
-    w.add(windGust);
+    // Multi-frequency 3D Perlin noise flow field across space and time:
+    // Scale 1: Macro terrarium circulation (wavelength ~380mm)
+    float nx1 = p.x * 0.0026;
+    float ny1 = p.y * 0.0026;
+    float nz1 = p.z * 0.0030;
 
-    // Thermal updraft: air near the warm ceiling light rises!
-    float distToLightHoriz = dist(p.x, p.y, lightPos.x, lightPos.y);
-    if (distToLightHoriz < lightThermalRadius && p.z > cubeH * 0.3) {
-      float thermalLift = map(distToLightHoriz, 0, lightThermalRadius, 0.65, 0.0);
-      w.z += thermalLift;
+    // Scale 2: Meso turbulent convective vortices (wavelength ~110mm)
+    float nx2 = p.x * 0.0090 + 17.3;
+    float ny2 = p.y * 0.0090 + 29.1;
+    float nz2 = p.z * 0.0110;
+
+    // Scale 3: Micro turbulent boundary shear (wavelength ~32mm)
+    float nx3 = p.x * 0.0310 + 73.5;
+    float ny3 = p.y * 0.0310 + 84.2;
+    float nz3 = p.z * 0.0310;
+
+    float u = (noise(nx1, ny1, nz1 + windTime * 0.45) - 0.5) * 2.2
+            + (noise(nx2, ny2, nz2 + windTime * 1.15) - 0.5) * 1.3
+            + (noise(nx3, ny3, nz3 + windTime * 2.60) - 0.5) * 0.6;
+
+    float v = (noise(nx1 + 37.1, ny1, nz1 + windTime * 0.45) - 0.5) * 2.2
+            + (noise(nx2 + 37.1, ny2, nz2 + windTime * 1.15) - 0.5) * 1.3
+            + (noise(nx3 + 37.1, ny3, nz3 + windTime * 2.60) - 0.5) * 0.6;
+
+    float w = (noise(nx1 + 71.4, ny1 + 71.4, nz1 + windTime * 0.40) - 0.5) * 1.1
+            + (noise(nx2 + 71.4, ny2 + 71.4, nz2 + windTime * 0.90) - 0.5) * 0.8;
+
+    // Thermal convection chimney: air near the ceiling lamp heats and accelerates upwards
+    float distToLamp = dist(p.x, p.y, lightPos.x, lightPos.y);
+    if (distToLamp < lightThermalRadius && p.z > 25) {
+      float thermalLift = map(distToLamp, 0, lightThermalRadius, 1.45, 0.0);
+      w += thermalLift;
+
+      // Air spreading outward radially under ceiling
+      if (p.z > cubeH * 0.70) {
+        float radDist = max(1.0, distToLamp);
+        u += ((p.x - lightPos.x) / radDist) * 0.75;
+        v += ((p.y - lightPos.y) / radDist) * 0.75;
+      }
     }
-    return w;
+
+    // Cool perimeter wall sinking drafts (convective loop closure)
+    float edgeDistX = cubeW * 0.5 - abs(p.x);
+    float edgeDistY = cubeD * 0.5 - abs(p.y);
+    if ((edgeDistX < 55 || edgeDistY < 55) && p.z > 40) {
+      w -= 0.55 * (1.0 - min(edgeDistX, edgeDistY) / 55.0);
+    }
+
+    PVector windVec = new PVector(u, v, w);
+    windVec.add(windGust);
+    return windVec;
   }
 
   void spawnFood(PVector pos, int type, String name, float amount) {
@@ -275,12 +331,15 @@ class Environment {
       line(t1.x, t1.y, t2.x, t2.y);
     }
 
-    // Render Air Drift Motes (Visualizing Wind currents)
-    strokeWeight(1.2);
+    // Render Air Drift Streamlines (Visualizing dynamic 3D turbulent flow field)
+    strokeWeight(1.0);
     for (AirDriftParticle ap : airParticles) {
-      PVector sp = cam.toScreen(ap.pos.x, ap.pos.y, ap.pos.z);
-      stroke(140, 200, 255, ap.alpha);
-      point(sp.x, sp.y);
+      PVector sp1 = cam.toScreen(ap.prevPos.x, ap.prevPos.y, ap.prevPos.z);
+      PVector sp2 = cam.toScreen(ap.pos.x, ap.pos.y, ap.pos.z);
+      stroke(130, 205, 255, ap.alpha);
+      line(sp1.x, sp1.y, sp2.x, sp2.y);
+      stroke(200, 240, 255, ap.alpha * 0.8);
+      point(sp2.x, sp2.y);
     }
 
     // Render Scent Trail Particles
@@ -450,22 +509,27 @@ class PointOfInterest {
 // -----------------------------------------------------------------------------
 class AirDriftParticle {
   PVector pos;
+  PVector prevPos;
   float alpha;
 
   AirDriftParticle(float x, float y, float z) {
     pos = new PVector(x, y, z);
-    alpha = random(40, 110);
+    prevPos = pos.copy();
+    alpha = random(40, 115);
   }
 
   void update(PVector wind, float w, float d, float h) {
+    prevPos.set(pos);
     pos.add(wind);
     // Boundary wrap
-    if (pos.x > w/2) pos.x = -w/2;
-    if (pos.x < -w/2) pos.x = w/2;
-    if (pos.y > d/2) pos.y = -d/2;
-    if (pos.y < -d/2) pos.y = d/2;
-    if (pos.z > h) pos.z = 2;
-    if (pos.z < 0) pos.z = h - 2;
+    boolean wrapped = false;
+    if (pos.x > w/2) { pos.x = -w/2; wrapped = true; }
+    if (pos.x < -w/2) { pos.x = w/2; wrapped = true; }
+    if (pos.y > d/2) { pos.y = -d/2; wrapped = true; }
+    if (pos.y < -d/2) { pos.y = d/2; wrapped = true; }
+    if (pos.z > h) { pos.z = 2; wrapped = true; }
+    if (pos.z < 0) { pos.z = h - 2; wrapped = true; }
+    if (wrapped) prevPos.set(pos);
   }
 }
 

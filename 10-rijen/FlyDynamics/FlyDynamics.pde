@@ -1,15 +1,12 @@
 // =============================================================================
 // FlyDynamics.pde - Diptera Neuro-Ethology & Biomechanics Laboratory
 // =============================================================================
-// An interactive laboratory for studying Diptera behavior, biomechanics, and cycles:
-// - Zoomed-out 3D Observation Cube with tiny realistic fly avatars & flight trails
+// Features:
+// - Perfectly framed 3D Observation Cube (all 8 corners & ceiling fully visible)
 // - Dedicated Bottom Panel: Pixel-art anatomical & biomechanical diagram of single fly
-// - Learning Curve & Mushroom Body Dopamine Oscilloscope
-// - Dual bioenergetics: Trehalose flight fuel vs Protein oogenesis/vitellogenesis
-// - Reproductive cycle: Courtship wing song -> Egg clutches -> Feeding larvae -> Adult eclosion
-// - Circadian photoperiod cycle (Day/Night torpor)
-// - Low-res compound eye ommatidia vision with looming optical flow detection
-// - Typography: Semplice Regular pixel font throughout
+// - Spatial Working Memory & Central Complex Ring Attractor
+// - Continuous ecosystem: Sustainable food replenishment, no flies freezing
+// - Typography: Strict 8px Semplice Regular throughout (no font size changes)
 // =============================================================================
 
 Environment env;
@@ -49,15 +46,15 @@ void setup() {
   }
   textFont(pixelFont, 8);
 
-  // Zoomed out camera to comfortably view the 3D Cube Terrarium in the upper area
-  cam = new IsoCamera(width / 2, height * 0.32, 0.70);
+  // Camera calibrated so the ENTIRE 3D Cube (ground, pillars, ceiling, wire) is 100% visible
+  cam = new IsoCamera(width / 2, 285, 0.44);
   env = new Environment();
   swarm = new ArrayList<Fly>();
 
   // Spawn initial cohort
   for (int i = 0; i < swarmInitialSize; i++) {
-    float rx = random(-env.cubeW * 0.38, env.cubeW * 0.38);
-    float ry = random(-env.cubeD * 0.38, env.cubeD * 0.38);
+    float rx = random(-env.cubeW * 0.35, env.cubeW * 0.35);
+    float ry = random(-env.cubeD * 0.35, env.cubeD * 0.35);
     float rz = (i % 3 == 0) ? 0 : random(30, env.cubeH * 0.75);
     Fly f = new Fly(rx, ry, rz);
     f.isFemale = (i % 2 == 0);
@@ -67,7 +64,7 @@ void setup() {
   }
 
   logEvent("LABORATORY READY: COHORT OF " + swarmInitialSize + " SPECIMENS.");
-  logEvent("CHAMBERS: SUCROSE DROP (CARBS), YEAST (PROTEIN), DEW.");
+  logEvent("ECOSYSTEM: AUTONOMOUS SUCROSE & PROTEIN FORAGING ACTIVE.");
 }
 
 void draw() {
@@ -89,7 +86,7 @@ void draw() {
     for (int i = env.larvae.size() - 1; i >= 0; i--) {
       Larva larva = env.larvae.get(i);
       if (larva.isReadyToPupate()) {
-        if (swarm.size() < 28) {
+        if (swarm.size() < 24) {
           Fly adult = new Fly(larva.pos.x, larva.pos.y, 0, larva.inheritedBrain);
           adult.state = STATE_CRAWLING;
           adult.trehalose = 0.95;
@@ -105,22 +102,22 @@ void draw() {
       Fly f = swarm.get(i);
       f.update(env, swarm);
       
-      // Nighttime torpor
-      if (sunFactor < 0.15 && f.pos.z > env.cubeH * 0.65 && f.state == STATE_CRAWLING) {
+      // Nighttime torpor on upper perch
+      if (sunFactor < 0.15 && f.pos.z > env.cubeH * 0.7 && f.state == STATE_CRAWLING) {
         f.state = STATE_GROOMING;
       }
     }
   }
 
-  // Camera tracking in Macro Focus Mode vs Normal Zoomed-Out Cube
+  // Camera tracking: Macro Mode vs Full-Cube Mode
   if (macroFocusMode && selectedIndex < swarm.size()) {
     Fly sel = swarm.get(selectedIndex);
-    cam.targetZoom = 1.6;
-    cam.targetOrigin.set(width/2 - sel.pos.x * 1.0, height * 0.32 - sel.pos.y * 0.5 + sel.pos.z * 0.7);
+    cam.targetZoom = 1.4;
+    cam.targetOrigin.set(width/2 - sel.pos.x * 0.8, 285 - sel.pos.y * 0.4 + sel.pos.z * 0.6);
   } else {
-    // Zoomed out cube comfortably framed in upper 60%
-    cam.targetZoom = 0.70;
-    cam.targetOrigin.set(width/2, height * 0.31);
+    // Shows the full cube completely in camera without clipping any corners
+    cam.targetZoom = 0.44;
+    cam.targetOrigin.set(width / 2, 285);
   }
   cam.update();
 
@@ -136,10 +133,11 @@ void draw() {
 
   // 3. RENDER TOP HEADER & LAB NOTEBOOK
   displayHeaderBar(sunFactor);
-  displayLabNotebook(18, 50, 260, 140);
+  displayLabNotebook(18, 48, 260, 130);
 
-  // 4. RENDER DEDICATED BOTTOM INSPECTOR (PIXEL ART FLY DIAGRAM, VISION & BRAIN)
-  Fly selFly = (selectedIndex < swarm.size()) ? swarm.get(selectedIndex) : null;
+  // 4. RENDER DEDICATED BOTTOM INSPECTOR (ALL FONTS EXACTLY SAME SIZE)
+  if (selectedIndex >= swarm.size()) selectedIndex = max(0, swarm.size() - 1);
+  Fly selFly = (swarm.size() > 0) ? swarm.get(selectedIndex) : null;
   if (selFly != null) {
     displayBottomInspector(selFly);
   }
@@ -154,7 +152,6 @@ void displayBottomInspector(Fly f) {
   float margin = 16;
   float totalW = width - margin * 2;
 
-  // Split into 3 columns:
   float col1W = 280;
   float col2W = 570;
   float col3W = totalW - col1W - col2W - 20;
@@ -183,15 +180,15 @@ void displayBottomInspector(Fly f) {
   fill(f.brain.thoughtColor, 40);
   stroke(f.brain.thoughtColor, 180);
   strokeWeight(1);
-  rect(col2X + col2W - 220, bottomY + 6, 212, 14);
+  rect(col2X + col2W - 250, bottomY + 6, 242, 14);
   fill(f.brain.thoughtColor);
   textAlign(CENTER, CENTER);
-  text(f.brain.currentThought, col2X + col2W - 114, bottomY + 12);
+  text(f.brain.currentThought, col2X + col2W - 129, bottomY + 12);
 
-  // Draw the Detailed Pixel-Art Fly Diagram
+  // Draw the Detailed Pixel-Art Fly Diagram (1:1 UNSCALED - Fonts match perfectly!)
   float diagramCenterX = col2X + 155;
   float diagramCenterY = bottomY + bottomH * 0.54;
-  f.displayBottomDiagram(diagramCenterX, diagramCenterY, 0.76);
+  f.displayBottomDiagram(diagramCenterX, diagramCenterY);
 
   // Draw Specimen Bio-Status Meters (Right side inside column 2)
   float metersX = col2X + 320;
@@ -242,20 +239,20 @@ void displayBottomInspector(Fly f) {
 }
 
 // -----------------------------------------------------------------------------
-// Top Header Bar & Lab Telemetry (Pixel Art Aesthetic)
+// Top Header Bar & Lab Telemetry
 // -----------------------------------------------------------------------------
 void displayHeaderBar(float sunFactor) {
   pushStyle();
   fill(10, 15, 24);
   noStroke();
-  rect(0, 0, width, 38);
+  rect(0, 0, width, 36);
   stroke(55, 95, 140);
   strokeWeight(1);
-  line(0, 38, width, 38);
+  line(0, 36, width, 36);
 
   fill(255);
   textAlign(LEFT, CENTER);
-  text("DIPTERA ETHOLOGY & NEURO-BIOMECHANICS LABORATORY", 16, 19);
+  text("DIPTERA ETHOLOGY & NEURO-BIOMECHANICS LABORATORY", 16, 18);
 
   int females = 0;
   int males = 0;
@@ -267,11 +264,11 @@ void displayHeaderBar(float sunFactor) {
 
   fill(130, 195, 255);
   String diurnalPhase = (sunFactor > 0.5) ? "DAY [12:00]" : (sunFactor > 0.1 ? "TWILIGHT" : "NIGHT (TORPOR)");
-  text("POP:" + swarm.size() + " (F:" + females + " M:" + males + ") | EGGS:" + env.eggs.size() + " | LARVAE:" + env.larvae.size() + " | AIR:" + airborne + " | " + diurnalPhase, 400, 19);
+  text("POP:" + swarm.size() + " (F:" + females + " M:" + males + ") | EGGS:" + env.eggs.size() + " | LARVAE:" + env.larvae.size() + " | AIR:" + airborne + " | " + diurnalPhase, 390, 18);
 
   textAlign(RIGHT, CENTER);
   fill(175, 190, 210);
-  text("[1]SUGAR [2]PROTEIN [3]DEW [W]WIND [D]DAY/NIGHT [F]THREAT [TAB]MACRO [P]PAUSE", width - 16, 19);
+  text("[1]SUGAR [2]PROTEIN [3]DEW [W]WIND [D]DAY/NIGHT [F]THREAT [TAB]MACRO [P]PAUSE", width - 16, 18);
   popStyle();
 }
 
@@ -289,7 +286,7 @@ void displayLabNotebook(float px, float py, float pw, float ph) {
   textAlign(LEFT, TOP);
   text("ETHOLOGY NOTEBOOK / EVENT LOG", px + 8, py + 6);
 
-  float logY = py + 22;
+  float logY = py + 20;
   int startIdx = max(0, labLog.size() - 6);
   for (int i = startIdx; i < labLog.size(); i++) {
     fill(140, 180, 220);
@@ -305,7 +302,6 @@ void logEvent(String entry) {
   if (labLog.size() > 40) labLog.remove(0);
 }
 
-// Pixelated Progress Bar with Discrete Blocks
 void drawPixelBar(String label, float val, color col, float x, float y, float w) {
   fill(140, 175, 205);
   textAlign(LEFT, CENTER);
@@ -340,17 +336,17 @@ String getStateName(int st) {
 void keyPressed() {
   if (key == '1') {
     PVector p = new PVector(random(-150, 150), random(-150, 150), 0);
-    env.spawnFood(p, FOOD_CARB, "Sucrose Drop", 160);
+    env.spawnFood(p, 0, "Sucrose Drop", 160);
     logEvent("DISPENSED SUCROSE DROPLET (CARB FUEL).");
 
   } else if (key == '2') {
     PVector p = new PVector(random(-150, 150), random(-150, 150), 0);
-    env.spawnFood(p, FOOD_PROTEIN, "Fermenting Yeast", 220);
+    env.spawnFood(p, 1, "Fermenting Yeast", 220);
     logEvent("DISPENSED YEAST (PROTEIN SUBSTRATE).");
 
   } else if (key == '3') {
     float gx = (random(1.0) > 0.5) ? env.cubeW * 0.48 : -env.cubeW * 0.48;
-    env.poiList.add(new PointOfInterest(new PVector(gx, random(-100, 100), random(40, 160)), "Condensation Dew", color(80, 200, 255), POI_WATER));
+    env.poiList.add(new PointOfInterest(new PVector(gx, random(-100, 100), random(40, 160)), "Condensation Dew", color(80, 200, 255), 0));
     logEvent("MISTED GLASS WALL WITH DEW DROPS.");
 
   } else if (key == 'w' || key == 'W') {
@@ -381,19 +377,22 @@ void keyPressed() {
 }
 
 void mousePressed() {
-  float minDist = 50;
-  int closest = selectedIndex;
-  for (int i = 0; i < swarm.size(); i++) {
-    PVector s = cam.toScreen(swarm.get(i).pos.x, swarm.get(i).pos.y, swarm.get(i).pos.z);
-    float d = dist(mouseX, mouseY, s.x, s.y);
-    if (d < minDist) {
-      minDist = d;
-      closest = i;
+  // If clicked inside the 3D cube area, check for fly selection
+  if (mouseY < height - 280) {
+    float minDist = 40;
+    int closest = selectedIndex;
+    for (int i = 0; i < swarm.size(); i++) {
+      PVector s = cam.toScreen(swarm.get(i).pos.x, swarm.get(i).pos.y, swarm.get(i).pos.z);
+      float d = dist(mouseX, mouseY, s.x, s.y);
+      if (d < minDist) {
+        minDist = d;
+        closest = i;
+      }
     }
-  }
-  if (closest != selectedIndex) {
-    selectedIndex = closest;
-    Fly f = swarm.get(selectedIndex);
-    logEvent("SELECTED SPECIMEN #" + (selectedIndex + 1) + " (" + (f.isFemale ? "FEMALE" : "MALE") + ")");
+    if (closest != selectedIndex && closest < swarm.size()) {
+      selectedIndex = closest;
+      Fly f = swarm.get(selectedIndex);
+      logEvent("SELECTED SPECIMEN #" + (selectedIndex + 1) + " (" + (f.isFemale ? "FEMALE" : "MALE") + ")");
+    }
   }
 }
