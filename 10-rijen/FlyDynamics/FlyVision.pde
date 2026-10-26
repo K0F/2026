@@ -110,9 +110,8 @@ class FlyVision {
     float dist = diff.mag();
     if (dist < 1.0) return;
 
-    float targetYaw = atan2(diff.y, diff.x) - heading;
-    while (targetYaw > PI) targetYaw -= TWO_PI;
-    while (targetYaw < -PI) targetYaw += TWO_PI;
+    float rawYaw = atan2(diff.y, diff.x) - heading;
+    float targetYaw = atan2(sin(rawYaw), cos(rawYaw));
 
     float targetPitch = atan2(diff.z, sqrt(diff.x * diff.x + diff.y * diff.y)) - pitch;
 

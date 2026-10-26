@@ -88,13 +88,15 @@ void draw() {
     // Metamorphosis: Larvae pupate into adult flies
     for (int i = env.larvae.size() - 1; i >= 0; i--) {
       Larva larva = env.larvae.get(i);
-      if (larva.isReadyToPupate() && swarm.size() < 30) {
-        Fly adult = new Fly(larva.pos.x, larva.pos.y, 0, larva.inheritedBrain);
-        adult.state = STATE_CRAWLING;
-        adult.trehalose = 0.95;
-        swarm.add(adult);
+      if (larva.isReadyToPupate()) {
+        if (swarm.size() < 28) {
+          Fly adult = new Fly(larva.pos.x, larva.pos.y, 0, larva.inheritedBrain);
+          adult.state = STATE_CRAWLING;
+          adult.trehalose = 0.95;
+          swarm.add(adult);
+          logEvent("ECLOSION: LARVA PUPATED INTO ADULT " + (adult.isFemale ? "FEMALE" : "MALE") + " #" + swarm.size());
+        }
         env.larvae.remove(i);
-        logEvent("ECLOSION: LARVA PUPATED INTO ADULT " + (adult.isFemale ? "FEMALE" : "MALE") + " #" + swarm.size());
       }
     }
 

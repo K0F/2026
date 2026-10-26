@@ -320,7 +320,6 @@ class Environment {
       ellipse(sThreat.x, sThreat.y, threatVisualRadius * 1.8, threatVisualRadius * 1.0);
       fill(255, 60, 60);
       textAlign(CENTER, CENTER);
-      textSize(10);
       text("! LOOMING SWATER SHADOW !", sThreat.x, sThreat.y - 18);
     }
   }
@@ -395,8 +394,7 @@ class Food {
     // Label & Nutrition badge
     fill(230, 240, 255);
     textAlign(CENTER, BOTTOM);
-    textSize(9);
-    String typeTag = (type == FOOD_CARB) ? "[CARB: Trehalose Fuel]" : "[PROTEIN: Vitellogenesis]";
+    String typeTag = (type == FOOD_CARB) ? "[CARB]" : "[PROTEIN]";
     text(name + " " + typeTag, s.x, s.y - r * 0.6 - 4);
     popStyle();
   }
@@ -442,7 +440,6 @@ class PointOfInterest {
 
     fill(col, 200);
     textAlign(CENTER, TOP);
-    textSize(8);
     text(name, s.x, s.y + 9);
     popStyle();
   }
