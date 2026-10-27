@@ -86,11 +86,11 @@ class ZeroLagCameraGrabber:
             self.cap.release()
 
 class HandState:
-    """Tracks kinematics and ictus strikes for a single hand."""
-    def __init__(self, name="Hand", ema_alpha=0.65):
+    """Tracks kinematics and ictus strikes with adaptive 1-Euro smoothing."""
+    def __init__(self, name="Hand"):
         self.name = name
-        self.alpha = ema_alpha
         self.active = False
+        self.active_frames = 0
         self.x = 0.5
         self.y = 0.5
         self.prev_x = 0.5
@@ -104,14 +104,22 @@ class HandState:
 
     def update(self, target_x, target_y, area):
         self.active = True
-        self.x = self.alpha * target_x + (1.0 - self.alpha) * self.x
-        self.y = self.alpha * target_y + (1.0 - self.alpha) * self.y
+        self.active_frames = 12  # Hold active state across micro-pauses (~400ms)
+        
+        # Adaptive 1-Euro filtering: heavy smoothing when still, zero lag when moving fast
+        dx = target_x - self.x
+        dy = target_y - self.y
+        dist = np.sqrt(dx * dx + dy * dy)
+        alpha = float(np.clip(0.18 + dist * 9.0, 0.18, 0.72))
+        
+        self.x = alpha * target_x + (1.0 - alpha) * self.x
+        self.y = alpha * target_y + (1.0 - alpha) * self.y
         
         self.vx = self.x - self.prev_x
         self.vy = self.y - self.prev_y
         
-        speed = np.sqrt(self.vx*self.vx + self.vy*self.vy)
-        self.energy = 0.5 * (speed * 25.0 + area / 300.0) + 0.5 * self.energy
+        speed = np.sqrt(self.vx * self.vx + self.vy * self.vy)
+        self.energy = 0.4 * (speed * 28.0 + area / 250.0) + 0.6 * self.energy
         
         # Conducting Ictus Detector (Downbeat rebound: vy flips positive->negative OR high jerk)
         is_ictus = False
@@ -119,11 +127,11 @@ class HandState:
         jerk = abs(self.vy - self.prev_vy) * 50.0
         
         if self.ictus_cooldown <= 0:
-            if (self.prev_vy > 0.008 and self.vy <= 0.002) or (jerk > 0.45) or (speed > 0.05 and jerk > 0.35):
+            if (self.prev_vy > 0.006 and self.vy <= 0.002) or (jerk > 0.38) or (speed > 0.04 and jerk > 0.28):
                 is_ictus = True
                 intensity = float(np.clip(max(jerk, self.energy * 1.5), 0.25, 2.5))
                 self.ictus_flash = 1.0
-                self.ictus_cooldown = 5  # ~160ms lockout
+                self.ictus_cooldown = 6  # ~200ms lockout
                 
         self.prev_x = self.x
         self.prev_y = self.y
@@ -135,10 +143,14 @@ class HandState:
         return is_ictus, intensity
 
     def decay(self):
-        self.active = False
-        self.energy *= 0.85
-        self.vx *= 0.7
-        self.vy *= 0.7
+        if self.active_frames > 0:
+            self.active_frames -= 1
+        else:
+            self.active = False
+            
+        self.energy *= 0.88
+        self.vx *= 0.6
+        self.vy *= 0.6
         self.ictus_flash *= 0.80
         if self.ictus_cooldown > 0:
             self.ictus_cooldown -= 1
@@ -150,22 +162,26 @@ class DualHandConductor:
         self.min_area = min_area
         self.prev_gray = None
         
-        self.left_hand = HandState("Left", ema_alpha=0.7)
-        self.right_hand = HandState("Right", ema_alpha=0.7)
+        self.left_hand = HandState("Left")
+        self.right_hand = HandState("Right")
         self.span = 0.5
 
     def process(self, gray_frame):
+        # 1. Subtle Gaussian blur to eliminate CMOS pixel sensor noise
+        blurred = cv2.GaussianBlur(gray_frame, (5, 5), 0)
+        
         if self.prev_gray is None or self.prev_gray.shape != gray_frame.shape:
-            self.prev_gray = gray_frame.copy()
+            self.prev_gray = blurred.copy()
             return np.zeros_like(gray_frame), False, 0.0, False, 0.0, False
 
-        # 1. Temporal Motion Difference (Eliminates static background)
-        diff = cv2.absdiff(gray_frame, self.prev_gray)
-        self.prev_gray = gray_frame.copy()
+        # Temporal Motion Difference (Eliminates static background)
+        diff = cv2.absdiff(blurred, self.prev_gray)
+        self.prev_gray = blurred.copy()
 
         _, thresh = cv2.threshold(diff, self.diff_thresh, 255, cv2.THRESH_BINARY)
-        # Morphological dilation to connect hand fingers
+        # Morphological opening (removes salt-and-pepper dots) then dilation
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
         thresh = cv2.dilate(thresh, kernel, iterations=1)
 
         contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -193,16 +209,24 @@ class DualHandConductor:
             self.right_hand.decay()
             
         elif len(valid_blobs) == 1:
-            # Single hand moving: determine if Left or Right based on X position
+            # Single hand moving: proximity-based assignment with hysteresis
             bx, by, b_area = valid_blobs[0]
-            if bx > 0.48:
-                # Right Hand (Baton / Beat)
+            dist_left = abs(bx - self.left_hand.x) if self.left_hand.active else 999.0
+            dist_right = abs(bx - self.right_hand.x) if self.right_hand.active else 999.0
+            
+            if dist_right < dist_left:
                 right_ictus, right_int = self.right_hand.update(bx, by, b_area)
                 self.left_hand.decay()
-            else:
-                # Left Hand (Expression / Gong)
+            elif dist_left < dist_right:
                 left_ictus, left_int = self.left_hand.update(bx, by, b_area)
                 self.right_hand.decay()
+            else:
+                if bx >= 0.5:
+                    right_ictus, right_int = self.right_hand.update(bx, by, b_area)
+                    self.left_hand.decay()
+                else:
+                    left_ictus, left_int = self.left_hand.update(bx, by, b_area)
+                    self.right_hand.decay()
                 
         else:
             # BOTH HANDS MOVING!
@@ -223,6 +247,8 @@ class DualHandConductor:
         is_tutti = False
         if left_ictus and right_ictus:
             is_tutti = True
+
+        return thresh, left_ictus, left_int, right_ictus, right_int, is_tutti
 
         return thresh, left_ictus, left_int, right_ictus, right_int, is_tutti
 
