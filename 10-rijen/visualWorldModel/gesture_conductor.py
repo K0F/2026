@@ -68,6 +68,9 @@ class ZeroLagCameraGrabber:
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 # Flip horizontally for natural conducting mirror
                 gray = cv2.flip(gray, 1)
+                # Ensure fixed resolution
+                if gray.shape[1] != self.w or gray.shape[0] != self.h:
+                    gray = cv2.resize(gray, (self.w, self.h))
                 with self.lock:
                     self.latest_frame = gray
             else:
@@ -152,7 +155,7 @@ class DualHandConductor:
         self.span = 0.5
 
     def process(self, gray_frame):
-        if self.prev_gray is None:
+        if self.prev_gray is None or self.prev_gray.shape != gray_frame.shape:
             self.prev_gray = gray_frame.copy()
             return np.zeros_like(gray_frame), False, 0.0, False, 0.0, False
 
