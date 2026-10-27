@@ -1,11 +1,11 @@
 """
-gesture_conductor.py - Zero-Latency Optical Gesture Conductor for SuperCollider
-Engineered for real-time responsiveness on t520:
-1. Zero-Latency Camera Thread: Uses native OpenCV V4L2 with a dedicated daemon thread to eliminate all OS pipe buffering.
-2. Temporal Motion Differencing: Strips static background (walls, furniture, face) so ONLY moving hands are tracked.
-3. Conducting Ictus Detector: Detects momentum reversals (downward strike rebounding upward) and kinetic snaps.
-4. Continuous Morphing: Mapped directly to hand elevation, lateral span, and gesture speed.
-5. Sends binary OSC directly to SuperCollider (port 57120).
+gesture_conductor.py - Dual-Hand Zero-Latency Optical Gesture Conductor
+Seamlessly isolates and tracks ONE moving hand or BOTH moving hands:
+1. Right Hand: The Baton / Timekeeper (rhythmic strikes, pitch base, stereo pan)
+2. Left Hand: Expressive Dynamics (modal gong accents, filter resonance, reverb)
+3. Hand Span: Spreading hands apart opens stereo field and harmonic density
+4. Dual Strike: Simultaneous downbeat triggers orchestral tutti sub-drop.
+Uses OpenCV V4L2 background thread + motion contour clustering (zero static background).
 """
 
 import sys
@@ -20,7 +20,7 @@ import pygame
 import cv2
 
 def make_osc_msg(address, *args):
-    """Zero-dependency pure binary OSC encoder."""
+    """Zero-dependency binary OSC encoder."""
     b_addr = address.encode('utf-8') + b'\0'
     while len(b_addr) % 4 != 0: b_addr += b'\0'
     
@@ -44,7 +44,7 @@ def make_osc_msg(address, *args):
     return b_addr + b_tags + payload
 
 class ZeroLagCameraGrabber:
-    """Native V4L2 camera grabber with background thread to prevent buffer buildup."""
+    """Native V4L2 capture with dedicated daemon thread to prevent pipe buffering."""
     def __init__(self, device_id=0, width=160, height=120):
         self.w = width
         self.h = height
@@ -52,26 +52,24 @@ class ZeroLagCameraGrabber:
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
         self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        self.cap.set(cv2.CAP_PROP_FPS, 30)
 
-        self.latest_frame = np.zeros((height, width), dtype=np.float32)
+        self.latest_frame = np.zeros((height, width), dtype=np.uint8)
         self.running = True
         self.lock = threading.Lock()
         
         self.thread = threading.Thread(target=self._worker, daemon=True)
         self.thread.start()
-        print(f"[Camera] Direct V4L2 capture active on /dev/video{device_id} ({width}x{height})")
+        print(f"[Camera] Zero-latency V4L2 capture active on /dev/video{device_id} ({width}x{height})")
 
     def _worker(self):
         while self.running:
             ret, frame = self.cap.read()
             if ret:
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                # Flip horizontally so it acts like a mirror
+                # Flip horizontally for natural conducting mirror
                 gray = cv2.flip(gray, 1)
-                norm = gray.astype(np.float32) / 255.0
                 with self.lock:
-                    self.latest_frame = norm
+                    self.latest_frame = gray
             else:
                 time.sleep(0.01)
 
@@ -84,122 +82,175 @@ class ZeroLagCameraGrabber:
         if self.cap.isOpened():
             self.cap.release()
 
-class MotionConductorEngine:
-    """Temporal frame-differencing gesture tracker and orchestral ictus detector."""
-    def __init__(self, threshold=0.08, ema_alpha=0.65):
-        self.thresh = threshold
+class HandState:
+    """Tracks kinematics and ictus strikes for a single hand."""
+    def __init__(self, name="Hand", ema_alpha=0.65):
+        self.name = name
         self.alpha = ema_alpha
-        self.prev_frame = None
-        
-        # Smoothed motion state
-        self.cx = 0.5
-        self.cy = 0.5
-        self.prev_cx = 0.5
-        self.prev_cy = 0.5
+        self.active = False
+        self.x = 0.5
+        self.y = 0.5
+        self.prev_x = 0.5
+        self.prev_y = 0.5
         self.vx = 0.0
         self.vy = 0.0
         self.prev_vy = 0.0
         self.energy = 0.0
-        self.prev_energy = 0.0
-        
         self.ictus_cooldown = 0
+        self.ictus_flash = 0.0
 
-    def process(self, frame):
-        """
-        Takes current grayscale frame in [0, 1].
-        Returns: (motion_mask, cx, cy, energy, is_ictus, ictus_intensity)
-        """
-        if self.prev_frame is None:
-            self.prev_frame = frame.copy()
-            return np.zeros_like(frame), 0.5, 0.5, 0.0, False, 0.0
-
-        # 1. Temporal Frame Difference (Strips all static background)
-        diff = np.abs(frame - self.prev_frame)
-        self.prev_frame = frame.copy()
-
-        motion_mask = np.where(diff > self.thresh, diff, 0.0).astype(np.float32)
-        total_motion = float(np.sum(motion_mask))
-
-        h, w = frame.shape
+    def update(self, target_x, target_y, area):
+        self.active = True
+        self.x = self.alpha * target_x + (1.0 - self.alpha) * self.x
+        self.y = self.alpha * target_y + (1.0 - self.alpha) * self.y
+        
+        self.vx = self.x - self.prev_x
+        self.vy = self.y - self.prev_y
+        
+        speed = np.sqrt(self.vx*self.vx + self.vy*self.vy)
+        self.energy = 0.5 * (speed * 25.0 + area / 300.0) + 0.5 * self.energy
+        
+        # Conducting Ictus Detector (Downbeat rebound: vy flips positive->negative OR high jerk)
         is_ictus = False
-        ictus_intensity = 0.0
+        intensity = 0.0
+        jerk = abs(self.vy - self.prev_vy) * 45.0
+        
+        if self.ictus_cooldown <= 0:
+            if (self.prev_vy > 0.015 and self.vy <= 0.005) or (jerk > 0.80):
+                is_ictus = True
+                intensity = float(np.clip(max(jerk, self.energy * 1.5), 0.2, 2.5))
+                self.ictus_flash = 1.0
+                self.ictus_cooldown = 6
+                
+        self.prev_x = self.x
+        self.prev_y = self.y
+        self.prev_vy = self.vy
+        if self.ictus_cooldown > 0:
+            self.ictus_cooldown -= 1
+        self.ictus_flash *= 0.82
+        
+        return is_ictus, intensity
 
-        if total_motion > 5.0:
-            # Centroid of movement (where the hand is)
-            y_coords, x_coords = np.mgrid[:h, :w]
-            raw_cx = float(np.sum(x_coords * motion_mask) / total_motion) / w
-            raw_cy = float(np.sum(y_coords * motion_mask) / total_motion) / h
-            
-            # Exponential Moving Average for smooth, fluid tracking
-            self.cx = self.alpha * raw_cx + (1.0 - self.alpha) * self.cx
-            self.cy = self.alpha * raw_cy + (1.0 - self.alpha) * self.cy
-            
-            # Velocities
-            self.vx = self.cx - self.prev_cx
-            self.vy = self.cy - self.prev_cy
-            
-            # Kinetic Energy
-            raw_energy = float(np.sqrt(self.vx*self.vx + self.vy*self.vy) * 20.0 + total_motion / 150.0)
-            self.energy = 0.5 * raw_energy + 0.5 * self.energy
-            
-            # 2. THE CONDUCTING ICTUS DETECTOR:
-            # In conducting, the beat is the instant the hand reaches the bottom of a stroke
-            # and snaps upward (vy flips from positive/downward to negative/upward with high deceleration)
-            # OR a sudden spike and sharp arrest in kinetic energy
-            jerk = abs(self.vy - self.prev_vy) * 40.0
-            energy_snap = (self.prev_energy - self.energy) * 5.0
-
-            if self.ictus_cooldown <= 0:
-                # Downward-to-upward rebound OR sharp directional deceleration
-                if (self.prev_vy > 0.02 and self.vy <= 0.005) or (jerk > 0.85) or (energy_snap > 1.2 and self.prev_energy > 0.8):
-                    is_ictus = True
-                    ictus_intensity = float(np.clip(max(jerk, energy_snap, self.energy * 1.5), 0.2, 2.5))
-                    self.ictus_cooldown = 6  # Minimum 6 frames (~200ms) between strikes to prevent double-triggering
-
-            self.prev_cx = self.cx
-            self.prev_cy = self.cy
-            self.prev_vy = self.vy
-            self.prev_energy = self.energy
-        else:
-            # Stillness (Fermata)
-            self.energy *= 0.85
-            self.vx *= 0.7
-            self.vy *= 0.7
-
+    def decay(self):
+        self.active = False
+        self.energy *= 0.85
+        self.vx *= 0.7
+        self.vy *= 0.7
+        self.ictus_flash *= 0.80
         if self.ictus_cooldown > 0:
             self.ictus_cooldown -= 1
 
-        return motion_mask, self.cx, self.cy, self.energy, is_ictus, ictus_intensity
+class DualHandConductor:
+    """Isolates moving hands via contour clustering on temporal frame difference."""
+    def __init__(self, diff_threshold=22, min_area=35):
+        self.diff_thresh = diff_threshold
+        self.min_area = min_area
+        self.prev_gray = None
+        
+        self.left_hand = HandState("Left", ema_alpha=0.7)
+        self.right_hand = HandState("Right", ema_alpha=0.7)
+        self.span = 0.5
+
+    def process(self, gray_frame):
+        if self.prev_gray is None:
+            self.prev_gray = gray_frame.copy()
+            return np.zeros_like(gray_frame), False, 0.0, False, 0.0, False
+
+        # 1. Temporal Motion Difference (Eliminates static background)
+        diff = cv2.absdiff(gray_frame, self.prev_gray)
+        self.prev_gray = gray_frame.copy()
+
+        _, thresh = cv2.threshold(diff, self.diff_thresh, 255, cv2.THRESH_BINARY)
+        # Morphological dilation to connect hand fingers
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        thresh = cv2.dilate(thresh, kernel, iterations=1)
+
+        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        valid_blobs = []
+        h, w = gray_frame.shape
+        for c in contours:
+            area = cv2.contourArea(c)
+            if area >= self.min_area:
+                M = cv2.moments(c)
+                if M['m00'] > 0:
+                    cx = float(M['m10'] / M['m00']) / w
+                    cy = float(M['m01'] / M['m00']) / h
+                    valid_blobs.append((cx, cy, area))
+
+        # Sort blobs by area (largest moving hands first)
+        valid_blobs.sort(key=lambda b: b[2], reverse=True)
+
+        left_ictus, left_int = False, 0.0
+        right_ictus, right_int = False, 0.0
+
+        if len(valid_blobs) == 0:
+            # No hands moving
+            self.left_hand.decay()
+            self.right_hand.decay()
+            
+        elif len(valid_blobs) == 1:
+            # Single hand moving: determine if Left or Right based on X position
+            bx, by, b_area = valid_blobs[0]
+            if bx > 0.48:
+                # Right Hand (Baton / Beat)
+                right_ictus, right_int = self.right_hand.update(bx, by, b_area)
+                self.left_hand.decay()
+            else:
+                # Left Hand (Expression / Gong)
+                left_ictus, left_int = self.left_hand.update(bx, by, b_area)
+                self.right_hand.decay()
+                
+        else:
+            # BOTH HANDS MOVING!
+            # Take the top 2 largest moving blobs and sort from left to right
+            top2 = sorted(valid_blobs[:2], key=lambda b: b[0])
+            lx, ly, l_area = top2[0]
+            rx, ry, r_area = top2[1]
+            
+            left_ictus, left_int = self.left_hand.update(lx, ly, l_area)
+            right_ictus, right_int = self.right_hand.update(rx, ry, r_area)
+            
+            # Compute Hand Span (distance between hands)
+            dx = self.right_hand.x - self.left_hand.x
+            dy = self.right_hand.y - self.left_hand.y
+            self.span = float(np.sqrt(dx*dx + dy*dy))
+
+        # Check for Dual Tutti Strike (both hands striking together)
+        is_tutti = False
+        if left_ictus and right_ictus:
+            is_tutti = True
+
+        return thresh, left_ictus, left_int, right_ictus, right_int, is_tutti
 
 def main():
-    parser = argparse.ArgumentParser(description="Zero-Latency SuperCollider Gesture Conductor")
+    parser = argparse.ArgumentParser(description="Zero-Latency Dual-Hand Gesture Conductor")
     parser.add_argument("--sc-host", type=str, default="127.0.0.1", help="SuperCollider IP host")
     parser.add_argument("--sc-port", type=int, default=57120, help="SuperCollider UDP port")
-    parser.add_argument("--device", type=int, default=0, help="V4L2 Camera ID (default 0)")
-    parser.add_argument("--thresh", type=float, default=0.07, help="Motion detection threshold")
+    parser.add_argument("--device", type=int, default=0, help="V4L2 Camera ID")
+    parser.add_argument("--thresh", type=int, default=22, help="Difference threshold (default 22)")
     args = parser.parse_args()
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sc_dest = (args.sc_host, args.sc_port)
-    print(f"[Conductor] Dispatching OSC to SuperCollider at {sc_dest}")
+    print(f"[Conductor] Dispatching Dual-Hand OSC to SuperCollider at {sc_dest}")
 
     camera = ZeroLagCameraGrabber(device_id=args.device, width=160, height=120)
-    engine = MotionConductorEngine(threshold=args.thresh, ema_alpha=0.7)
+    engine = DualHandConductor(diff_threshold=args.thresh, min_area=35)
 
     pygame.init()
     pygame.font.init()
-    width, height = 1080, 640
+    width, height = 1120, 640
     screen = pygame.display.set_mode((width, height))
-    pygame.display.set_caption("PixelSense :: Zero-Latency Gesture Conductor (kof)")
+    pygame.display.set_caption("PixelSense :: Dual-Hand Orchestral Conductor (kof)")
     clock = pygame.time.Clock()
 
     font = pygame.font.SysFont("monospace", 13)
     font_bold = pygame.font.SysFont("monospace", 15, bold=True)
     font_large = pygame.font.SysFont("monospace", 18, bold=True)
 
-    orbit_trail = []
-    energy_history = []
-    ictus_flash = 0.0
+    left_trail = []
+    right_trail = []
     running = True
 
     while running:
@@ -207,129 +258,179 @@ def main():
             if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key in [pygame.K_ESCAPE, pygame.K_q]):
                 running = False
 
-        # Grab zero-lag frame
-        frame = camera.get_frame()
-        motion_mask, cx, cy, energy, is_ictus, ictus_intensity = engine.process(frame)
+        gray = camera.get_frame()
+        motion_mask, l_hit, l_int, r_hit, r_int, is_tutti = engine.process(gray)
 
-        # 1. Trigger Ictus Strike
-        if is_ictus:
-            ictus_flash = 1.0
-            lateral_axis = float(cx)  # 0.0 (left) to 1.0 (right)
-            pkt_ictus = make_osc_msg("/conductor/ictus", float(ictus_intensity), float(lateral_axis))
-            sock.sendto(pkt_ictus, sc_dest)
+        # 1. Send Ictus Strikes
+        if is_tutti:
+            # Tutti Strike (Dual downbeat)
+            intensity = max(l_int, r_int)
+            pkt = make_osc_msg("/conductor/ictus", float(intensity), 0.5, 2)
+            sock.sendto(pkt, sc_dest)
+        else:
+            if l_hit:
+                # Left Hand Strike (Gong/Accent)
+                pkt = make_osc_msg("/conductor/ictus", float(l_int), float(1.0 - engine.left_hand.y), 0)
+                sock.sendto(pkt, sc_dest)
+            if r_hit:
+                # Right Hand Strike (Chime/Baton)
+                pkt = make_osc_msg("/conductor/ictus", float(r_int), float(engine.right_hand.x), 1)
+                sock.sendto(pkt, sc_dest)
 
-        # 2. Continuous Conductor Flow:
-        # z0 = Elevation (inverted: hand high = high filter cutoff)
-        # z1 = Lateral (pan: -1.0 left, +1.0 right)
-        # z2 = Energy (harmonic richness)
-        # z3 = Depth/Speed
-        z0 = float((1.0 - cy - 0.5) * 4.0)
-        z1 = float((cx - 0.5) * 4.0)
-        z2 = float(np.clip(energy, 0.0, 3.0))
-        z3 = float(np.clip(abs(engine.vy) * 20.0, 0.0, 3.0))
+        # 2. Continuous Flow: [ry, rx, ly, span]
+        # Invert Y so hand raised high = higher value (0.0 at bottom, 1.0 at top)
+        ry_elev = float(np.clip(1.0 - engine.right_hand.y, 0.0, 1.0))
+        rx_pan = float(np.clip(engine.right_hand.x, 0.0, 1.0))
+        ly_elev = float(np.clip(1.0 - engine.left_hand.y, 0.0, 1.0))
+        span_val = float(np.clip(engine.span, 0.1, 1.2))
 
-        pkt_morph = make_osc_msg("/conductor/morph", z0, z1, z2, z3)
+        pkt_morph = make_osc_msg("/conductor/morph", ry_elev, rx_pan, ly_elev, span_val)
         sock.sendto(pkt_morph, sc_dest)
 
-        # 3. Tension / Kinetic Energy
-        pkt_tension = make_osc_msg("/conductor/tension", float(energy), float(ictus_flash * 2.0))
+        # 3. Tension / Kinetic Surge
+        tot_energy = float(engine.left_hand.energy + engine.right_hand.energy)
+        pkt_tension = make_osc_msg("/conductor/tension", tot_energy, float(is_tutti * 2.0))
         sock.sendto(pkt_tension, sc_dest)
 
-        ictus_flash *= 0.80
-        orbit_trail.append((float(cx), float(cy)))
-        if len(orbit_trail) > 90:
-            orbit_trail.pop(0)
+        # Update visual trails
+        if engine.left_hand.active:
+            left_trail.append((engine.left_hand.x, engine.left_hand.y))
+        if len(left_trail) > 60:
+            left_trail.pop(0)
 
-        energy_history.append(energy)
-        if len(energy_history) > 120:
-            energy_history.pop(0)
+        if engine.right_hand.active:
+            right_trail.append((engine.right_hand.x, engine.right_hand.y))
+        if len(right_trail) > 60:
+            right_trail.pop(0)
 
         # --- DRAWING PIPELINE ---
         screen.fill((8, 10, 14))
 
-        p_w, p_h = 300, 225
+        p_w, p_h = 320, 240
         p1_x, p1_y = 40, 50
-        p2_x = 380
-        p3_x = 720
+        p2_x = 390
+        p3_x = 740
 
-        # Viewport 1: Camera Mirror
-        rgb_cam = np.repeat((frame * 255).astype(np.uint8)[:, :, np.newaxis], 3, axis=2)
+        # Viewport 1: Mirror Feed
+        rgb_cam = cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
         surf_cam = pygame.transform.scale(pygame.surfarray.make_surface(rgb_cam.swapaxes(0, 1)), (p_w, p_h))
         screen.blit(surf_cam, (p1_x, p1_y))
         pygame.draw.rect(screen, (35, 45, 55), (p1_x - 1, p1_y - 1, p_w + 2, p_h + 2), 1)
         screen.blit(font_bold.render("1. OPTICAL MIRROR (ZERO-LAG)", True, (200, 220, 240)), (p1_x, p1_y - 24))
 
-        # Viewport 2: Motion Energy Silhouette (Static Background Stripped)
+        # Viewport 2: Motion Mask (Zero Background)
         rgb_mot = np.zeros((motion_mask.shape[0], motion_mask.shape[1], 3), dtype=np.uint8)
-        rgb_mot[:, :, 0] = (motion_mask * 40).clip(0, 255).astype(np.uint8)
-        rgb_mot[:, :, 1] = (motion_mask * 230).clip(0, 255).astype(np.uint8)
-        rgb_mot[:, :, 2] = (motion_mask * 255).clip(0, 255).astype(np.uint8)
+        rgb_mot[:, :, 1] = motion_mask
+        rgb_mot[:, :, 2] = motion_mask
         surf_mot = pygame.transform.scale(pygame.surfarray.make_surface(rgb_mot.swapaxes(0, 1)), (p_w, p_h))
         screen.blit(surf_mot, (p2_x, p1_y))
         pygame.draw.rect(screen, (25, 60, 75), (p2_x - 1, p1_y - 1, p_w + 2, p_h + 2), 1)
-        screen.blit(font_bold.render("2. MOTION SILHOUETTE (BACKGROUND STRIPPED)", True, (60, 210, 255)), (p2_x, p1_y - 24))
+        screen.blit(font_bold.render("2. DUAL HAND ISOLATION MASK", True, (60, 210, 255)), (p2_x, p1_y - 24))
 
-        # Viewport 3: The Ictus Strike Reticle
+        # Overlay Hand Markers on motion viewport
+        if engine.left_hand.active:
+            lx_px = int(p2_x + engine.left_hand.x * p_w)
+            ly_px = int(p1_y + engine.left_hand.y * p_h)
+            pygame.draw.circle(screen, (40, 240, 160), (lx_px, ly_px), 12, 2)
+            screen.blit(font_bold.render("LEFT", True, (40, 240, 160)), (lx_px - 16, ly_px - 22))
+
+        if engine.right_hand.active:
+            rx_px = int(p2_x + engine.right_hand.x * p_w)
+            ry_px = int(p1_y + engine.right_hand.y * p_h)
+            pygame.draw.circle(screen, (255, 190, 50), (rx_px, ry_px), 12, 2)
+            screen.blit(font_bold.render("RIGHT", True, (255, 190, 50)), (rx_px - 18, ry_px - 22))
+
+        if engine.left_hand.active and engine.right_hand.active:
+            # Span line
+            pygame.draw.line(screen, (100, 200, 255), (lx_px, ly_px), (rx_px, ry_px), 1)
+
+        # Viewport 3: Dual Ictus Strike Indicators
         pygame.draw.rect(screen, (14, 18, 24), (p3_x, p1_y, p_w, p_h))
         pygame.draw.rect(screen, (80, 50, 20), (p3_x, p1_y, p_w, p_h), 1)
-        screen.blit(font_bold.render("3. THE ICTUS (SONIC MOMENT)", True, (255, 180, 50)), (p3_x, p1_y - 24))
+        screen.blit(font_bold.render("3. CONDUCTING ICTUS STRIKES", True, (255, 180, 50)), (p3_x, p1_y - 24))
 
-        mid_x = p3_x + p_w // 2
-        mid_y = p1_y + p_h // 2
-        reticle_r = int(24 + ictus_flash * 65)
-        col_ret = (int(255 * ictus_flash), int(180 + 75 * ictus_flash), int(40 * (1 - ictus_flash)))
-        pygame.draw.circle(screen, col_ret, (mid_x, mid_y), reticle_r, 2)
-        if ictus_flash > 0.08:
-            pygame.draw.circle(screen, (255, 230, 100), (mid_x, mid_y), int(18 * ictus_flash))
-            screen.blit(font_bold.render(">>> STRIKE! <<<", True, (255, 220, 80)), (mid_x - 55, mid_y + 40))
+        # Left Strike indicator
+        l_flash = engine.left_hand.ictus_flash
+        l_r = int(18 + l_flash * 45)
+        l_col = (int(40 + 200 * l_flash), int(220 + 35 * l_flash), int(140 * (1 - l_flash)))
+        pygame.draw.circle(screen, l_col, (p3_x + 80, p1_y + 110), l_r, 2)
+        screen.blit(font_bold.render("LEFT GONG", True, (60, 220, 160)), (p3_x + 45, p1_y + 175))
+
+        # Right Strike indicator
+        r_flash = engine.right_hand.ictus_flash
+        r_r = int(18 + r_flash * 45)
+        r_col = (int(255 * (0.6 + 0.4 * r_flash)), int(180 + 75 * r_flash), int(40 * (1 - r_flash)))
+        pygame.draw.circle(screen, r_col, (p3_x + 240, p1_y + 110), r_r, 2)
+        screen.blit(font_bold.render("RIGHT CHIME", True, (255, 190, 50)), (p3_x + 200, p1_y + 175))
+
+        if is_tutti:
+            screen.blit(font_large.render(">>> TUTTI DOWNBEAT! <<<", True, (255, 240, 120)), (p3_x + 40, p1_y + 35))
 
         # Bottom Left: Conducting Orbit Scope
-        o_x, o_y, o_w, o_h = 40, 320, 480, 270
-        pygame.draw.rect(screen, (12, 16, 22), (o_x, o_y, o_w, o_h))
-        pygame.draw.rect(screen, (25, 45, 65), (o_x, o_y, o_w, o_h), 1)
-        screen.blit(font_large.render("CONDUCTING ORBIT & TRAJECTORY", True, (180, 200, 220)), (o_x + 16, o_y + 14))
+        b_x, b_y, b_w, b_h = 40, 320, 670, 280
+        pygame.draw.rect(screen, (12, 16, 22), (b_x, b_y, b_w, b_h))
+        pygame.draw.rect(screen, (25, 45, 65), (b_x, b_y, b_w, b_h), 1)
+        screen.blit(font_large.render("DUAL-HAND CONDUCTING ORBITS (SPACE & ELEVATION)", True, (180, 200, 220)), (b_x + 16, b_y + 14))
 
         # Grid lines
-        pygame.draw.line(screen, (22, 30, 40), (o_x + o_w//2, o_y + 35), (o_x + o_w//2, o_y + o_h - 15), 1)
-        pygame.draw.line(screen, (22, 30, 40), (o_x + 20, o_y + o_h//2 + 10), (o_x + o_w - 20, o_y + o_h//2 + 10), 1)
+        pygame.draw.line(screen, (22, 30, 40), (b_x + b_w//2, b_y + 35), (b_x + b_w//2, b_y + b_h - 15), 1)
+        pygame.draw.line(screen, (22, 30, 40), (b_x + 20, b_y + b_h//2 + 10), (b_x + b_w - 20, b_y + b_h//2 + 10), 1)
 
-        # Draw trajectory trail
-        if len(orbit_trail) > 1:
-            for k in range(1, len(orbit_trail)):
-                x1 = int(o_x + 20 + orbit_trail[k-1][0] * (o_w - 40))
-                y1 = int(o_y + 35 + orbit_trail[k-1][1] * (o_h - 50))
-                x2 = int(o_x + 20 + orbit_trail[k][0] * (o_w - 40))
-                y2 = int(o_y + 35 + orbit_trail[k][1] * (o_h - 50))
-                alpha = int((k / len(orbit_trail)) * 240)
-                pygame.draw.line(screen, (40, alpha, 255), (x1, y1), (x2, y2), 2)
-                
-            # Current hand position
-            cur_x = int(o_x + 20 + cx * (o_w - 40))
-            cur_y = int(o_y + 35 + cy * (o_h - 50))
-            pygame.draw.circle(screen, (255, 230, 100), (cur_x, cur_y), 6)
+        # Left trail (Cyan/Green)
+        if len(left_trail) > 1:
+            for k in range(1, len(left_trail)):
+                x1 = int(b_x + 20 + left_trail[k-1][0] * (b_w - 40))
+                y1 = int(b_y + 35 + left_trail[k-1][1] * (b_h - 50))
+                x2 = int(b_x + 20 + left_trail[k][0] * (b_w - 40))
+                y2 = int(b_y + 35 + left_trail[k][1] * (b_h - 50))
+                pygame.draw.line(screen, (40, 220, 160), (x1, y1), (x2, y2), 2)
 
-        # Bottom Right: Kinetic Energy & Strike Waveform
-        k_x, k_y, k_w, k_h = 540, 320, 500, 270
-        pygame.draw.rect(screen, (12, 16, 22), (k_x, k_y, k_w, k_h))
-        pygame.draw.rect(screen, (25, 45, 65), (k_x, k_y, k_w, k_h), 1)
-        screen.blit(font_large.render("KINETIC ENERGY SPECTRUM (GESTURE SPEED)", True, (180, 200, 220)), (k_x + 16, k_y + 14))
+        # Right trail (Amber/Gold)
+        if len(right_trail) > 1:
+            for k in range(1, len(right_trail)):
+                x1 = int(b_x + 20 + right_trail[k-1][0] * (b_w - 40))
+                y1 = int(b_y + 35 + right_trail[k-1][1] * (b_h - 50))
+                x2 = int(b_x + 20 + right_trail[k][0] * (b_w - 40))
+                y2 = int(b_y + 35 + right_trail[k][1] * (b_h - 50))
+                pygame.draw.line(screen, (255, 190, 50), (x1, y1), (x2, y2), 2)
 
-        base_y = k_y + k_h - 35
-        pygame.draw.line(screen, (30, 40, 50), (k_x + 20, base_y), (k_x + k_w - 20, base_y), 1)
+        # Bottom Right: Telemetry
+        t_x, t_y, t_w, t_h = 740, 320, 320, 280
+        pygame.draw.rect(screen, (14, 18, 24), (t_x, t_y, t_w, t_h))
+        pygame.draw.rect(screen, (30, 40, 50), (t_x, t_y, t_w, t_h), 1)
+        screen.blit(font_bold.render("ORCHESTRAL TELEMETRY", True, (240, 205, 50)), (t_x + 14, t_y + 14))
 
-        if len(energy_history) > 1:
-            step_w = (k_w - 40) / max(len(energy_history), 1)
-            for k in range(1, len(energy_history)):
-                x1 = k_x + 20 + int((k - 1) * step_w)
-                y1 = base_y - int(np.clip(energy_history[k - 1] * 65, 0, k_h - 70))
-                x2 = k_x + 20 + int(k * step_w)
-                y2 = base_y - int(np.clip(energy_history[k] * 65, 0, k_h - 70))
-                col = (255, 180, 50) if energy_history[k] > 1.2 else (60, 210, 240)
-                pygame.draw.line(screen, col, (x1, y1), (x2, y2), 2)
+        telemetry = [
+            f"Active Hands: {'BOTH' if (engine.left_hand.active and engine.right_hand.active) else ('RIGHT' if engine.right_hand.active else ('LEFT' if engine.left_hand.active else 'NONE'))}",
+            f"Hand Span:    {engine.span:.2f} (Stereo Width)",
+            "",
+            f"RIGHT (Baton): Elev {ry_elev:.2f} | Pan {rx_pan:.2f}",
+            f"LEFT  (Expr):  Elev {ly_elev:.2f} | Res {engine.left_hand.energy:.2f}",
+            "",
+            f"Total Energy: {tot_energy:.2f}",
+            f"OSC Target:   {sc_dest[0]}:{sc_dest[1]}",
+            "",
+            "CONTROLS:",
+            "• One hand: Tracks seamlessly",
+            "• Two hands: Splits Left/Right",
+            "• Both snap down: TUTTI STRIKE",
+            "• [Q] to quit"
+        ]
 
-        # Live stats overlay
-        screen.blit(font.render(f"Hand Pos: ({cx:.2f}, {cy:.2f})  Energy: {energy:.2f}", True, (160, 180, 200)), (o_x + 20, o_y + o_h - 25))
-        screen.blit(font.render(f"OSC Target: {sc_dest[0]}:{sc_dest[1]}  [Q] to quit", True, (130, 150, 170)), (k_x + 20, k_y + k_h - 25))
+        ty = t_y + 42
+        for line in telemetry:
+            if "Active Hands:" in line or "TUTTI" in line:
+                col = (60, 240, 160)
+            elif "RIGHT" in line:
+                col = (255, 200, 60)
+            elif "LEFT" in line:
+                col = (100, 220, 240)
+            elif line.startswith("•"):
+                col = (140, 160, 180)
+            else:
+                col = (180, 200, 220)
+            screen.blit(font.render(line, True, col), (t_x + 14, ty))
+            ty += 18
 
         pygame.display.flip()
         clock.tick(30)
