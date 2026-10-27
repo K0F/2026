@@ -229,14 +229,21 @@ class DualHandConductor:
 def main():
     parser = argparse.ArgumentParser(description="Zero-Latency Dual-Hand Gesture Conductor")
     parser.add_argument("--sc-host", type=str, default="127.0.0.1", help="SuperCollider IP host")
-    parser.add_argument("--sc-port", type=int, default=57120, help="SuperCollider UDP port")
+    parser.add_argument("--sc-port", type=int, default=57130, help="SuperCollider UDP port (default 57130)")
     parser.add_argument("--device", type=int, default=0, help="V4L2 Camera ID")
     parser.add_argument("--thresh", type=int, default=22, help="Difference threshold (default 22)")
     args = parser.parse_args()
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sc_dest = (args.sc_host, args.sc_port)
-    print(f"[Conductor] Dispatching Dual-Hand OSC to SuperCollider at {sc_dest}")
+    targets = list({(args.sc_host, args.sc_port), (args.sc_host, 57120), (args.sc_host, 57130)})
+    print(f"[Conductor] Dispatching Dual-Hand OSC to SuperCollider at targets: {targets}")
+
+    def send_osc_all(pkt):
+        for tgt in targets:
+            try:
+                sock.sendto(pkt, tgt)
+            except Exception:
+                pass
 
     camera = ZeroLagCameraGrabber(device_id=args.device, width=160, height=120)
     engine = DualHandConductor(diff_threshold=args.thresh, min_area=35)
@@ -269,13 +276,13 @@ def main():
             # Tutti Strike (Dual downbeat)
             intensity = max(l_int, r_int)
             pkt = make_osc_msg("/conductor/ictus", float(intensity), 0.5, 0.2)
-            sock.sendto(pkt, sc_dest)
+            send_osc_all(pkt)
         elif r_hit or l_hit:
             hit_x = float(engine.right_hand.x if r_hit else engine.left_hand.x)
             hit_y = float(1.0 - (engine.right_hand.y if r_hit else engine.left_hand.y))
             hit_int = float(r_int if r_hit else l_int)
             pkt = make_osc_msg("/conductor/ictus", hit_int, hit_x, hit_y)
-            sock.sendto(pkt, sc_dest)
+            send_osc_all(pkt)
 
         # 2. Continuous Flow: Determine primary active hand coordinates
         # If right hand is active, it guides pitch & pan. If only left hand is active, it guides pitch & pan.
@@ -304,12 +311,12 @@ def main():
 
         # Send Continuous Morph: [yElev (0..1), xPan (-1..1), energy (0..3), span (0..1.5)]
         pkt_morph = make_osc_msg("/conductor/morph", y_elev, x_pan, tot_energy, span_val)
-        sock.sendto(pkt_morph, sc_dest)
+        send_osc_all(pkt_morph)
 
         # 3. Tension / Kinetic Surge
         tot_energy = float(engine.left_hand.energy + engine.right_hand.energy)
         pkt_tension = make_osc_msg("/conductor/tension", tot_energy, float(is_tutti * 2.0))
-        sock.sendto(pkt_tension, sc_dest)
+        send_osc_all(pkt_tension)
 
         # Update visual trails
         if engine.left_hand.active:
