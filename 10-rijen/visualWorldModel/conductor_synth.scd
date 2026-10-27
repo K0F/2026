@@ -95,7 +95,8 @@ s.waitForBoot({
         
         sig = Splay.ar(sig, (0.4 + lSpan * 0.6).clip(0.2, 1.0), 0.2);
         sig = Balance2.ar(sig[0], sig[1], lPan);
-        sig = Limiter.ar(sig * masterVol, 0.22);
+        sig = Sanitize.ar(LeakDC.ar(sig * masterVol));
+        sig = Limiter.ar(sig, 0.22);
         sig;
     };
     ~wash.play;
@@ -117,14 +118,14 @@ s.waitForBoot({
         var osc1 = VarSaw.ar(lPitch, 0, (0.1 + lEnergy * 0.4).clip(0.05, 0.95)) * 0.22;
         var osc2 = Pulse.ar(lPitch * 1.005, (0.2 + lEnergy * 0.3).clip(0.1, 0.9)) * 0.18;
         
-        var mixed = osc1 + osc2 + sub;
-        var filtered = MoogFF.ar(mixed, lCutoff.clip(60, 14000), lRes.clip(0.1, 2.5));
+        var mixed = LeakDC.ar(osc1 + osc2 + sub);
+        var filtered = MoogFF.ar(mixed, lCutoff.clip(60, 14000), lRes.clip(0.1, 2.0));
         var saturated = (filtered * (1.0 + lEnergy * 1.5)).tanh;
         
         var sig = saturated * (0.04 + (lEnergy * 0.1)).clip(0.02, 0.2) * masterVol;
+        sig = Sanitize.ar(LeakDC.ar(Pan2.ar(sig, lPan)));
         sig = Limiter.ar(sig, 0.22);
-        
-        Pan2.ar(sig, lPan);
+        sig;
     };
     ~conductorFlow.play;
 
