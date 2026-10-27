@@ -423,16 +423,16 @@ def main():
             f"Active Hands: {'BOTH' if (engine.left_hand.active and engine.right_hand.active) else ('RIGHT' if engine.right_hand.active else ('LEFT' if engine.left_hand.active else 'NONE'))}",
             f"Hand Span:    {engine.span:.2f} (Stereo Width)",
             "",
-            f"RIGHT (Baton): Elev {ry_elev:.2f} | Pan {rx_pan:.2f}",
-            f"LEFT  (Expr):  Elev {ly_elev:.2f} | Res {engine.left_hand.energy:.2f}",
+            f"Pitch / Elev: {y_elev:.2f} (4-Octave Sweep)",
+            f"Stereo Pan:   {x_pan:+.2f} (L/R Balance)",
+            f"Kinetic Speed:{tot_energy:.2f} (Saturation)",
             "",
-            f"Total Energy: {tot_energy:.2f}",
             f"OSC Target:   {sc_dest[0]}:{sc_dest[1]}",
             "",
-            "CONTROLS:",
-            "• One hand: Tracks seamlessly",
-            "• Two hands: Splits Left/Right",
-            "• Both snap down: TUTTI STRIKE",
+            "CONDUCTING GESTURES:",
+            "• Vertical Y:   Pitch & Moog Cutoff",
+            "• Horizontal X: Stereo Panning",
+            "• Downbeat Snap:ICTUS Resonant Strike",
             "• [Q] to quit"
         ]
 
