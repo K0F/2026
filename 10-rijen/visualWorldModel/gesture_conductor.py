@@ -434,7 +434,7 @@ def main():
             f"Stereo Pan:   {x_pan:+.2f} (L/R Balance)",
             f"Kinetic Speed:{tot_energy:.2f} (Saturation)",
             "",
-            f"OSC Target:   {sc_dest[0]}:{sc_dest[1]}",
+            f"OSC Targets:  {', '.join(f'{t[0]}:{t[1]}' for t in targets)}",
             "",
             "CONDUCTING GESTURES:",
             "• Vertical Y:   Pitch & Moog Cutoff",
