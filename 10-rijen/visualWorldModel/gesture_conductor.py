@@ -53,15 +53,23 @@ def make_osc_msg(address, *args):
     return b_addr + b_tags + payload
 
 class VideoStreamGrabber:
-    """Grabs 64x64 frames from /dev/video0 via ffmpeg pipe, or falls back to synthetic conductor"""
-    def __init__(self, device_path="/dev/video0", width=64, height=64):
+    """
+    Grabs 64x64 frames from:
+    1. Local /dev/video0 (on t520 via ffmpeg pipe)
+    2. UDP port 5555 (on bazina, receiving live camera from t520)
+    3. Synthetic conducting gesture fallback (Lissajous conducting beats)
+    """
+    def __init__(self, device_path="/dev/video0", width=64, height=64, udp_port=5555):
         self.w = width
         self.h = height
         self.frame_bytes = width * height
         self.proc = None
+        self.udp_sock = None
         self.synthetic_phase = 0.0
+        self.source_mode = "synthetic"
         
-        if os.path.exists(device_path):
+        # 1. Try Local V4L2 device
+        if device_path.startswith("/dev/video") and os.path.exists(device_path):
             try:
                 cmd = [
                     "ffmpeg", "-f", "v4l2", "-video_size", "320x240", "-framerate", "30",
@@ -70,18 +78,52 @@ class VideoStreamGrabber:
                     "-f", "rawvideo", "-"
                 ]
                 self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-                print(f"[VideoStream] Connected to {device_path} via ffmpeg pipe.")
+                self.source_mode = "local_v4l2"
+                print(f"[VideoStream] Connected to local webcam {device_path} via ffmpeg pipe.")
             except Exception as e:
                 print(f"[VideoStream] Error opening {device_path}: {e}")
                 self.proc = None
-        else:
-            print(f"[VideoStream] Device {device_path} not found. Using synthetic conductor mode.")
+
+        # 2. If local device not found or UDP explicitly requested, listen on UDP port
+        if self.proc is None or device_path.startswith("udp"):
+            try:
+                import select
+                self.select = select
+                self.udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                self.udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                self.udp_sock.bind(("0.0.0.0", udp_port))
+                self.udp_sock.setblocking(False)
+                self.source_mode = "network_udp"
+                print(f"[VideoStream] Local camera not present. Listening on UDP port {udp_port} for fleet camera stream (from t520)...")
+            except Exception as e:
+                print(f"[VideoStream] UDP socket bind failed: {e}")
+                self.udp_sock = None
 
     def read_frame(self):
+        # Local ffmpeg pipe
         if self.proc is not None:
             raw = self.proc.stdout.read(self.frame_bytes)
             if len(raw) == self.frame_bytes:
                 arr = np.frombuffer(raw, dtype=np.uint8).reshape((self.h, self.w))
+                return arr.astype(np.float32) / 255.0
+
+        # Network UDP receiver (freshest frame)
+        if self.udp_sock is not None:
+            got_pkt = False
+            last_raw = None
+            while True:
+                ready = self.select.select([self.udp_sock], [], [], 0.0)
+                if not ready[0]:
+                    break
+                try:
+                    data, _ = self.udp_sock.recvfrom(65535)
+                    if len(data) >= self.frame_bytes:
+                        last_raw = data[:self.frame_bytes]
+                        got_pkt = True
+                except Exception:
+                    break
+            if got_pkt and last_raw is not None:
+                arr = np.frombuffer(last_raw, dtype=np.uint8).reshape((self.h, self.w))
                 return arr.astype(np.float32) / 255.0
 
         # Synthetic Conducting Gesture Fallback (Lissajous trajectory with conducting beats)
@@ -99,6 +141,8 @@ class VideoStreamGrabber:
     def close(self):
         if self.proc is not None:
             self.proc.terminate()
+        if self.udp_sock is not None:
+            self.udp_sock.close()
 
 class NumpySpatialEncoder:
     """Zero-dependency spatial moment and harmonic DCT encoder (pure NumPy)"""
