@@ -116,14 +116,14 @@ class HandState:
         # Conducting Ictus Detector (Downbeat rebound: vy flips positive->negative OR high jerk)
         is_ictus = False
         intensity = 0.0
-        jerk = abs(self.vy - self.prev_vy) * 45.0
+        jerk = abs(self.vy - self.prev_vy) * 50.0
         
         if self.ictus_cooldown <= 0:
-            if (self.prev_vy > 0.015 and self.vy <= 0.005) or (jerk > 0.80):
+            if (self.prev_vy > 0.008 and self.vy <= 0.002) or (jerk > 0.45) or (speed > 0.05 and jerk > 0.35):
                 is_ictus = True
-                intensity = float(np.clip(max(jerk, self.energy * 1.5), 0.2, 2.5))
+                intensity = float(np.clip(max(jerk, self.energy * 1.5), 0.25, 2.5))
                 self.ictus_flash = 1.0
-                self.ictus_cooldown = 6
+                self.ictus_cooldown = 5  # ~160ms lockout
                 
         self.prev_x = self.x
         self.prev_y = self.y
@@ -264,30 +264,46 @@ def main():
         gray = camera.get_frame()
         motion_mask, l_hit, l_int, r_hit, r_int, is_tutti = engine.process(gray)
 
-        # 1. Send Ictus Strikes
+        # 1. Send Ictus Strikes (Accents)
         if is_tutti:
             # Tutti Strike (Dual downbeat)
             intensity = max(l_int, r_int)
-            pkt = make_osc_msg("/conductor/ictus", float(intensity), 0.5, 2)
+            pkt = make_osc_msg("/conductor/ictus", float(intensity), 0.5, 0.2)
             sock.sendto(pkt, sc_dest)
+        elif r_hit or l_hit:
+            hit_x = float(engine.right_hand.x if r_hit else engine.left_hand.x)
+            hit_y = float(1.0 - (engine.right_hand.y if r_hit else engine.left_hand.y))
+            hit_int = float(r_int if r_hit else l_int)
+            pkt = make_osc_msg("/conductor/ictus", hit_int, hit_x, hit_y)
+            sock.sendto(pkt, sc_dest)
+
+        # 2. Continuous Flow: Determine primary active hand coordinates
+        # If right hand is active, it guides pitch & pan. If only left hand is active, it guides pitch & pan.
+        if engine.right_hand.active and not engine.left_hand.active:
+            prim_x = engine.right_hand.x
+            prim_y = engine.right_hand.y
+            span_val = 0.2
+        elif engine.left_hand.active and not engine.right_hand.active:
+            prim_x = engine.left_hand.x
+            prim_y = engine.left_hand.y
+            span_val = 0.2
+        elif engine.right_hand.active and engine.left_hand.active:
+            prim_x = engine.right_hand.x
+            prim_y = engine.right_hand.y
+            span_val = float(np.clip(engine.span, 0.1, 1.5))
         else:
-            if l_hit:
-                # Left Hand Strike (Gong/Accent)
-                pkt = make_osc_msg("/conductor/ictus", float(l_int), float(1.0 - engine.left_hand.y), 0)
-                sock.sendto(pkt, sc_dest)
-            if r_hit:
-                # Right Hand Strike (Chime/Baton)
-                pkt = make_osc_msg("/conductor/ictus", float(r_int), float(engine.right_hand.x), 1)
-                sock.sendto(pkt, sc_dest)
+            prim_x = 0.5
+            prim_y = 0.5
+            span_val = 0.2
 
-        # 2. Continuous Flow: [ry, rx, ly, span]
-        # Invert Y so hand raised high = higher value (0.0 at bottom, 1.0 at top)
-        ry_elev = float(np.clip(1.0 - engine.right_hand.y, 0.0, 1.0))
-        rx_pan = float(np.clip(engine.right_hand.x, 0.0, 1.0))
-        ly_elev = float(np.clip(1.0 - engine.left_hand.y, 0.0, 1.0))
-        span_val = float(np.clip(engine.span, 0.1, 1.2))
+        # Invert Y so hand raised high = high pitch & bright filter
+        y_elev = float(np.clip(1.0 - prim_y, 0.0, 1.0))
+        # Pan: -1.0 (left) to +1.0 (right)
+        x_pan = float(np.clip((prim_x - 0.5) * 2.2, -1.0, 1.0))
+        tot_energy = float(engine.left_hand.energy + engine.right_hand.energy)
 
-        pkt_morph = make_osc_msg("/conductor/morph", ry_elev, rx_pan, ly_elev, span_val)
+        # Send Continuous Morph: [yElev (0..1), xPan (-1..1), energy (0..3), span (0..1.5)]
+        pkt_morph = make_osc_msg("/conductor/morph", y_elev, x_pan, tot_energy, span_val)
         sock.sendto(pkt_morph, sc_dest)
 
         # 3. Tension / Kinetic Surge
