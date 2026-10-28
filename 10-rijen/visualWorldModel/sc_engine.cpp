@@ -52,6 +52,7 @@ static int pack_osc(char *buf, const char *addr, const char *types, ...) {
     for (int i = 0; i < tlen; i++) {
         if (types[i] == 's') {
             const char *str = va_arg(ap, const char*);
+            if (!str) str = "";
             int slen = strlen(str);
             memcpy(buf + off, str, slen);
             off += slen;
@@ -196,7 +197,7 @@ extern "C" void sc_engine_strike_ictus(float intensity, float hit_x, float hit_y
     if (brightness > 2.2f) brightness = 2.2f;
 
     char buf[512];
-    int len = pack_osc(buf, "/s_new", "siisisfsfsfsfsf",
+    int len = pack_osc(buf, "/s_new", "siiisfsfsfsfsf",
                        "ictusStrike", -1, 1, 0,
                        "freq", freq,
                        "decay", decay,
@@ -218,7 +219,7 @@ extern "C" void sc_engine_strike_tutti(float intensity, float pan) {
     if (pan_val > 1.0f)  pan_val = 1.0f;
 
     char buf[256];
-    int len = pack_osc(buf, "/s_new", "siisisfsf",
+    int len = pack_osc(buf, "/s_new", "siiisfsf",
                        "tuttiThump", -1, 1, 0,
                        "amp", amp,
                        "pan", pan_val);
