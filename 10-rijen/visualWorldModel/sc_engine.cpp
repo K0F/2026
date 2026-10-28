@@ -79,6 +79,15 @@ static int pack_osc(char *buf, const char *addr, const char *types, ...) {
 extern "C" bool sc_engine_init(const char *synthdefs_dir, int udp_port) {
     printf("[sc_engine] Booting embedded libscsynth audio engine...\n");
 
+    /* Ensure PipeWire / JACK environment auto-connects audio ports */
+    if (system("pgrep -x carla >/dev/null 2>&1") == 0) {
+        setenv("SC_JACK_DEFAULT_INPUTS", "system", 0);
+        setenv("SC_JACK_DEFAULT_OUTPUTS", "Carla", 0);
+    } else {
+        setenv("SC_JACK_DEFAULT_INPUTS", "system", 0);
+        setenv("SC_JACK_DEFAULT_OUTPUTS", "system", 0);
+    }
+
     WorldOptions options;
     options.mRealTime = true;
     options.mNumAudioBusChannels = 128;
@@ -110,13 +119,17 @@ extern "C" bool sc_engine_init(const char *synthdefs_dir, int udp_port) {
     /* Allow scsynth audio thread 80ms to index .scsyndef files */
     usleep(80000);
 
+    /* Connect JACK/PipeWire output ports to hardware audio sinks */
+    system("pw-link SuperCollider:out_1 $(pw-link -i 2>/dev/null | grep -E 'playback_FL|playback_1' | head -n1) 2>/dev/null || pw-link SuperCollider:out_1 system:playback_1 2>/dev/null");
+    system("pw-link SuperCollider:out_2 $(pw-link -i 2>/dev/null | grep -E 'playback_FR|playback_2' | head -n1) 2>/dev/null || pw-link SuperCollider:out_2 system:playback_2 2>/dev/null");
+
     /* Instantiate persistent synthesis nodes */
     // 1. Lead Conductor Flow
-    len = pack_osc(buf, "/s_new", "sii", "conductorFlow", NODE_FLOW, 1, 0);
+    len = pack_osc(buf, "/s_new", "siii", "conductorFlow", NODE_FLOW, 1, 0);
     World_SendPacket(g_world, len, buf, sc_reply_callback);
 
     // 2. Signature Ambient Wash
-    len = pack_osc(buf, "/s_new", "sii", "conductorWash", NODE_WASH, 1, 0);
+    len = pack_osc(buf, "/s_new", "siii", "conductorWash", NODE_WASH, 1, 0);
     World_SendPacket(g_world, len, buf, sc_reply_callback);
 
     g_nodes_active = true;
