@@ -73,7 +73,7 @@ pushStyle();
 #line 31 "sketch.pde"
 noFill();
 #line 33 "sketch.pde"
-stroke( 0xFF00CCFF, 120);
+stroke( 0xFFCC00, 120);
 #line 34 "sketch.pde"
 strokeWeight( 5);
 #line 35 "sketch.pde"
@@ -87,7 +87,7 @@ stroke( 127, 127, 250);
 #line 42 "sketch.pde"
 ellipse( width / 2, height / 2, 200, 200);
 #line 44 "sketch.pde"
-fill( 0xFF00CCFF);
+fill( 0xffcc00);
 #line 46 "sketch.pde"
 text( "36dh dekans = 36 * 10° EarthR", 40, 50);
 #line 48 "sketch.pde"
