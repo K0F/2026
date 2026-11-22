@@ -1,0 +1,4 @@
+linux-amd64/
+application.linux*
+application.windows*
+application.macosx*
